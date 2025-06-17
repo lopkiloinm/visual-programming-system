@@ -31,15 +31,27 @@ export const CodeEditor: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-white">
-      <div className="flex-1 p-4">
-        <textarea
-          value={formatCode(generatedCode)}
-          className="w-full h-full font-mono text-sm border border-gray-200 rounded-lg p-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50"
-          placeholder="// Your p5.js code will appear here"
-          spellCheck={false}
-          readOnly
-        />
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between p-3 bg-gray-50 border-b">
+        <h3 className="text-sm font-semibold text-gray-700">Generated Code</h3>
+        <div className="text-xs text-gray-500">q5.js + p5play</div>
+      </div>
+      
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full overflow-auto bg-gray-900 text-green-400 font-mono text-sm">
+          <pre className="p-4 whitespace-pre-wrap">
+            <code>
+              {formatCode(generatedCode) || '// Your q5.js + p5play code will appear here\n// Create blocks and connect them to generate code!\n\n// Example:\n// function setup() {\n//   createCanvas(480, 360);\n// }\n//\n// function draw() {\n//   background(255);\n//   // Your sprite actions will appear here\n// }'}
+            </code>
+          </pre>
+        </div>
+      </div>
+      
+      <div className="p-2 bg-gray-800 text-gray-400 text-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-green-500"></div>
+          <span>Code generated from visual blocks</span>
+        </div>
       </div>
     </div>
   );

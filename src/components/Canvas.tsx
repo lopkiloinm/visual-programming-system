@@ -1,8 +1,18 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Play, Pause, RotateCcw } from 'lucide-react';
-import p5 from 'p5';
 import { useBlockContext } from '../contexts/BlockContext';
 import { useSpriteContext } from '../contexts/SpriteContext';
+
+// Import Q5 normally as it doesn't have loading order dependencies
+import Q5 from 'q5';
+
+// Extend Window interface for global mouse coordinates
+declare global {
+  interface Window {
+    globalMouseX: number;
+    globalMouseY: number;
+  }
+}
 
 // Move drag state OUTSIDE the component so it persists across re-renders
 let persistentDragState = {
@@ -13,6 +23,89 @@ let persistentDragState = {
   startX: 0,
   startY: 0,
   hasMoved: false
+};
+
+// Global flag to track if planck and p5play are loaded
+let librariesLoaded = false;
+let loadingPromise: Promise<void> | null = null;
+
+// Function to load scripts in proper order via script tags
+const ensureLibrariesLoaded = async (): Promise<void> => {
+  if (librariesLoaded) return;
+  
+  if (loadingPromise) {
+    return loadingPromise;
+  }
+  
+  loadingPromise = (async () => {
+    console.log('🔧 Loading planck.js physics engine via script tag...');
+    
+    // First, load planck.js via script tag to ensure it's globally available
+    await new Promise<void>((resolve, reject) => {
+      // Check if planck is already loaded
+      if ((window as any).planck || (window as any).pl) {
+        console.log('✅ planck.js already loaded globally');
+        resolve();
+        return;
+      }
+      
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/planck-js@0.3/dist/planck.min.js';
+      script.onload = () => {
+        console.log('✅ planck.js loaded successfully via CDN');
+        resolve();
+      };
+      script.onerror = () => {
+        console.error('❌ Failed to load planck.js via CDN');
+        reject(new Error('Failed to load planck.js'));
+      };
+      document.head.appendChild(script);
+    });
+    
+    // Wait a bit more to ensure planck is fully initialized
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    console.log('🎮 Loading p5play game framework via script tag...');
+    
+    // Now load p5play via script tag
+    await new Promise<void>((resolve, reject) => {
+      // Check if p5play is already loaded
+      if ((window as any).Sprite || (window as any).p5play) {
+        console.log('✅ p5play already loaded globally');
+        resolve();
+        return;
+      }
+      
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/p5play@latest';
+      script.onload = () => {
+        console.log('✅ p5play loaded successfully via CDN');
+        resolve();
+      };
+      script.onerror = () => {
+        console.error('❌ Failed to load p5play via CDN');
+        reject(new Error('Failed to load p5play'));
+      };
+      document.head.appendChild(script);
+    });
+    
+    // Wait a bit more to ensure libraries are fully initialized
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    console.log('✅ Both planck.js and p5play loaded successfully!');
+    console.log('Available globals:', {
+      planck: !!(window as any).planck,
+      pl: !!(window as any).pl,
+      Sprite: !!(window as any).Sprite,
+      p5play: !!(window as any).p5play,
+      planck_on_window: Object.keys(window).filter(k => k.toLowerCase().includes('planck')),
+      sprite_on_window: Object.keys(window).filter(k => k.toLowerCase().includes('sprite'))
+    });
+    
+    librariesLoaded = true;
+  })();
+  
+  return loadingPromise;
 };
 
 interface CanvasProps {
@@ -30,7 +123,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   onRunningStateChange 
 }) => {
   const canvasRef = useRef<HTMLDivElement>(null);
-  const p5Instance = useRef<p5 | null>(null);
+  const q5Instance = useRef<any>(null);
   const { generatedCode } = useBlockContext();
   const { sprites, updateSprite, selectSprite, resetSpritesToInitial } = useSpriteContext();
   const [isRunning, setIsRunning] = useState(false);
@@ -50,16 +143,37 @@ export const Canvas: React.FC<CanvasProps> = ({
     type: 'action' | 'wait' | 'info';
     timestamp: number;
   }>>([]);
-  const persistentSpritesRef = useRef<any[]>([]);
-  const animatedPositionsRef = useRef<Map<string, {x: number, y: number}>>(new Map());
+  const [librariesReady, setLibrariesReady] = useState(false);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  
+  // p5play specific refs
+  const p5playSpritesRef = useRef<Map<string, any>>(new Map());
+  const worldRef = useRef<any>(null);
   const currentGeneratedCodeRef = useRef<string>(generatedCode);
   const globalFrameCountRef = useRef<number>(0);
+  const codeExecutionScopeRef = useRef<any>({});
+
+  // Load libraries on component mount
+  useEffect(() => {
+    const loadLibraries = async () => {
+      try {
+        setLoadingError(null);
+        await ensureLibrariesLoaded();
+        setLibrariesReady(true);
+      } catch (error: any) {
+        console.error('❌ Failed to load libraries:', error);
+        setLoadingError(error.message || 'Failed to load required libraries');
+      }
+    };
+    
+    loadLibraries();
+  }, []);
 
   // Update code reference when it changes (without recreating sketch)
   useEffect(() => {
     currentGeneratedCodeRef.current = generatedCode;
-    console.log('📝 Code updated in existing sketch (no recreation needed)');
   }, [generatedCode]);
+
   const debugLogScrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll debug log to bottom when new logs are added
@@ -119,6 +233,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     const newRunningState = !isRunning;
     setIsRunning(newRunningState);
     
+    // Update ref immediately for draw loop access
+    isRunningRef.current = newRunningState;
+    
     // Notify parent component of running state change
     if (onRunningStateChange) {
       onRunningStateChange(newRunningState);
@@ -126,25 +243,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     
     // Log start/stop
     if (newRunningState) {
-      addDebugLog(globalFrameCountRef.current, '🚀 Canvas started - Action queue beginning', 'info');
+      addDebugLog(debugFrameCount, 'Canvas started', 'info');
     } else {
-      addDebugLog(globalFrameCountRef.current, '⏸️ Canvas paused', 'info');
+             addDebugLog(debugFrameCount, 'Canvas paused', 'info');
     }
     
-    // When pausing, sync sprite positions from animated positions to React state, then clear animated positions
-    if (!newRunningState) {
-      console.log('Animation paused - syncing animated positions to React state');
-      animatedPositionsRef.current.forEach((pos, spriteId) => {
+    // When pausing, sync sprite positions from p5play sprites to React state
+    if (!newRunningState && p5playSpritesRef.current) {
+      p5playSpritesRef.current.forEach((p5playSprite, spriteId) => {
         updateSpriteRef.current(spriteId, {
-          x: Math.round(pos.x),
-          y: Math.round(pos.y)
+          x: Math.round(p5playSprite.x),
+          y: Math.round(p5playSprite.y)
         });
-        console.log(`Synced sprite ${spriteId} to position (${Math.round(pos.x)}, ${Math.round(pos.y)})`);
       });
-      
-      // Clear animated positions so dragging works from React state
-      animatedPositionsRef.current.clear();
-      console.log('Cleared animated positions - ready for manual control');
       
       // Clear debug info when paused
       setDebugInfo({});
@@ -168,56 +279,82 @@ export const Canvas: React.FC<CanvasProps> = ({
       });
     }
     
-    // Reset the debug frame counter and global frame count
+    // Reset p5play sprites to initial positions
+    if (p5playSpritesRef.current) {
+      p5playSpritesRef.current.forEach((p5playSprite, spriteId) => {
+        const initialSprite = initialSprites.find(s => s.id === spriteId);
+        if (initialSprite) {
+          p5playSprite.x = initialSprite.x;
+          p5playSprite.y = initialSprite.y;
+          p5playSprite.vel.x = 0;
+          p5playSprite.vel.y = 0;
+        }
+      });
+    }
+    
+    // Reset the debug frame counter
     setDebugFrameCount(0);
-    globalFrameCountRef.current = 0;
     
     // Clear debug info and logs
     setDebugInfo({});
     setDebugLogs([]);
     
+    // Clear code execution scope to avoid variable redeclaration
+    codeExecutionScopeRef.current = {};
+    
     // Add reset log after clearing (will be the first log)
     setTimeout(() => {
-      addDebugLog(0, '🔄 Canvas reset - Frame counter and action queues cleared', 'info');
+      addDebugLog(0, 'Canvas reset - Frame counter cleared', 'info');
     }, 10);
-    
-    // Clear animated positions so sprites reset to their original positions
-    animatedPositionsRef.current.clear();
-    console.log('Cleared animated positions on reset');
     
     // Clear any wait states that might be stuck
     sprites.forEach(sprite => {
       if ((sprite as any).waitUntilFrame && (sprite as any).waitUntilFrame > 0) {
-        console.log(`🧹 Clearing wait state for sprite ${sprite.id}: was waiting until frame ${(sprite as any).waitUntilFrame}`);
         updateSpriteRef.current(sprite.id, { 
           ...(sprite as any),
-          waitUntilFrame: 0,
-          currentActionIndex: 0,
-          actionState: 'ready'
+          waitUntilFrame: 0
         } as any);
       }
     });
-    
-    // Reset keeps current run/pause state - user controls when to start
     
     // Increment reset counter to force useEffect to re-run
     setResetCounter(prev => prev + 1);
   };
 
-  useEffect(() => {
-    if (!canvasRef.current) return;
-
-    if (p5Instance.current) {
-      p5Instance.current.remove();
+  // Helper function to extract function contents safely
+  const extractDrawLogic = (code: string) => {
+    // Extract just the content inside the draw function
+    const drawMatch = code.match(/function\s+draw\s*\(\s*\)\s*\{([\s\S]*)\}/);
+    if (drawMatch) {
+      return drawMatch[1].trim();
     }
     
-    console.log('🎯 Creating p5 sketch (should only happen once or on reset)');
-    console.log('Reset counter:', resetCounter);
-    console.log('Creating new p5 sketch - animated positions:', Array.from(animatedPositionsRef.current.entries()));
+    // If no draw function found, look for updateSprites calls or similar
+    const lines = code.split('\n');
+    const drawLogic = lines.filter(line => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith('//') && 
+             !trimmed.startsWith('/*') && 
+             !trimmed.includes('function ') &&
+             !trimmed.startsWith('let ') &&
+             !trimmed.startsWith('const ') &&
+             !trimmed.startsWith('var ') &&
+             trimmed.length > 0;
+    });
+    
+    return drawLogic.join('\n');
+  };
+
+  useEffect(() => {
+    // Don't create the sketch until libraries are loaded
+    if (!librariesReady || !canvasRef.current) return;
+
+    if (q5Instance.current) {
+      q5Instance.current.remove();
+    }
 
     // Parse the generated code to extract different function parts
     const parseGeneratedCode = (code: string) => {
-      console.log('Parsing generated code:', code);
       
       // Simple function to extract content between braces
       const extractFunctionContent = (functionName: string) => {
@@ -249,692 +386,312 @@ export const Canvas: React.FC<CanvasProps> = ({
       const draw = extractFunctionContent('draw');
       const mousePressed = extractFunctionContent('mousePressed');
       
-      console.log('Extracted setup:', setup);
-      console.log('Extracted draw:', draw);
-      console.log('Extracted mousePressed:', mousePressed);
-      
       return { setup, draw, mousePressed };
     };
 
-    const sketch = (p: p5) => {
-      // Persistent sprite state that accumulates changes across frames
-      let persistentSprites: any[] = [];
-      // Universal frame clock for the entire program (using persistent ref)
-      console.log('📅 Initializing sketch with persistent frame count:', globalFrameCountRef.current);
-      
-      p.setup = () => {
-        p.createCanvas(480, 360);
+    const sketch = (q: any) => {
+      // q5.js + p5play setup
+      q.setup = () => {
+        q.createCanvas(480, 360);
         
-        // Initialize persistent sprites from React state or animated positions
-        // CRITICAL: Use animated positions if they exist to prevent position reset
-        persistentSprites = spritesRef.current.map(sprite => {
-          // ALWAYS prefer animated positions if they exist, regardless of running state
-          // This prevents position reset when sketch is recreated during animation
-          const animatedPos = animatedPositionsRef.current.get(sprite.id);
-          const shouldUseAnimatedPos = animatedPos && animatedPos.x !== undefined && animatedPos.y !== undefined;
-          
-          // Fix impossible wait states when sketch is recreated
-          let waitUntilFrame = sprite.waitUntilFrame || 0;
-          if (waitUntilFrame > 0 && waitUntilFrame > globalFrameCountRef.current + 1000) {
-            console.log(`🚨 Clearing impossible wait state for sprite ${sprite.id}: waitUntilFrame=${waitUntilFrame}, currentFrame=${globalFrameCountRef.current}`);
-            waitUntilFrame = 0; // Clear impossible wait state
-          }
-          
-          console.log(`Initializing sprite ${sprite.id}:`, {
-            reactState: {x: sprite.x, y: sprite.y},
-            animatedPos: animatedPos,
-            willUseAnimated: shouldUseAnimatedPos,
-            waitUntilFrame: waitUntilFrame,
-            originalWaitUntilFrame: sprite.waitUntilFrame,
-            currentFrame: globalFrameCountRef.current,
-            isRunning: isRunningRef.current
-          });
-          
-          return {
-            id: sprite.id,
-            name: sprite.name,
-            x: shouldUseAnimatedPos ? animatedPos.x : sprite.x,
-            y: shouldUseAnimatedPos ? animatedPos.y : sprite.y,
-            size: sprite.size || 30,
-            color: sprite.color || '#ff6b6b',
-            visible: sprite.visible !== false,
-            waitUntilFrame: waitUntilFrame,
-            actionQueue: (sprite as any).actionQueue || [],
-            currentActionIndex: (sprite as any).currentActionIndex || 0,
-            actionState: (sprite as any).actionState || 'ready'
-          };
-        });
+        // Initialize p5play world with gravity disabled for 2D programming
+        (q as any).world.gravity.y = 0;
+        worldRef.current = (q as any).world;
         
-        if (isRunningRef.current) {
-          console.log('Using animated positions for persistent sprites');
-        } else {
-          console.log('Using React state positions for persistent sprites');
-        }
+        // Clear existing p5play sprites map
+        p5playSpritesRef.current.clear();
         
-        // Store persistent sprites in ref for access from toggle function
-        persistentSpritesRef.current = persistentSprites;
+        // Clear code execution scope for fresh start
+        codeExecutionScopeRef.current = {};
         
-        // Execute setup code from generated code (ALWAYS, regardless of running state)
+        // Let generated code handle all sprite creation - no duplicate sprites!
+        
+        // Execute all generated code once during setup to establish variables and functions
         try {
-          const { setup } = parseGeneratedCode(currentGeneratedCodeRef.current);
-          if (setup) {
-              // Create sprite context that tracks changes
-              const spriteContext = {
-                originalSprites: persistentSprites.map(s => ({ ...s })),
-                spriteUpdates: new Map()
-              };
-
-              const executeSetup = new Function(
-                'p', 'context', 'animatedPositionsRef',
+          const executeAllCode = new Function(
+            'q', 'world', 'p5playSprites', 'addDebugLog', 'codeScope', 'Sprite',
                 'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
-                'circle', 'ellipse', 'rect',
-                `
-                console.log('Executing setup code');
-                const persistentSpritesData = context.originalSprites;
-                
-                // Store original values to detect changes (before generated code runs)
-                const originalSprites = persistentSpritesData.map(s => ({ ...s }));
-                
-                // Execute ALL the generated code first (includes sprite declarations)
-                ` + currentGeneratedCodeRef.current + `
-                
-                // After generated code runs, update the sprites array with persistent data
-                if (typeof sprites !== 'undefined' && sprites.length > 0) {
-                  // Update the generated sprites array with our persistent data
-                  persistentSpritesData.forEach((persistentSprite, index) => {
-                    if (sprites[index]) {
-                      sprites[index].x = persistentSprite.x;
-                      sprites[index].y = persistentSprite.y;
-                      sprites[index].size = persistentSprite.size;
-                      sprites[index].color = persistentSprite.color;
-                    }
-                  });
-                }
-                
-                // Now execute the setup function if it exists
+            'circle', 'ellipse', 'rect', 'mouseX', 'mouseY',
+            `
+            // Execute all generated code and manually assign variables to persistent scope
+            with (codeScope) {
+              // Execute the entire generated code 
+              ${currentGeneratedCodeRef.current}
+              
+                              // Manually assign variables to codeScope for persistence
+               try {
+                 addDebugLog(0, 'Checking variables: globalFrameCount=' + (typeof globalFrameCount) + ', sprites=' + (typeof sprites), 'info');
+                 
+                 if (typeof globalFrameCount !== 'undefined') {
+                   codeScope.globalFrameCount = globalFrameCount;
+                   addDebugLog(0, 'Stored globalFrameCount: ' + globalFrameCount, 'info');
+                 } else {
+                   // Initialize if not found
+                   codeScope.globalFrameCount = 0;
+                   addDebugLog(0, 'Initialized globalFrameCount to 0', 'info');
+                 }
+                 
+                 if (typeof sprites !== 'undefined') codeScope.sprites = sprites;
+                 if (typeof getSpriteById !== 'undefined') codeScope.getSpriteById = getSpriteById;
+                 if (typeof updateSprite !== 'undefined') codeScope.updateSprite = updateSprite;
+                 if (typeof updateSprites !== 'undefined') codeScope.updateSprites = updateSprites;
+                 if (typeof setup !== 'undefined') codeScope.setup = setup;
+                 if (typeof draw !== 'undefined') codeScope.draw = draw;
+                 if (typeof mousePressed !== 'undefined') codeScope.mousePressed = mousePressed;
+                 
+                 addDebugLog(0, 'Variables stored. codeScope has: ' + Object.keys(codeScope).join(', '), 'info');
+               } catch (e) {
+                 addDebugLog(0, 'Variable assignment error: ' + e.message, 'info');
+               }
+              
+              // Run setup if it exists
                 if (typeof setup === 'function') {
                   setup();
-                }
-                
-                // Check for sprite changes and record them
-                if (typeof sprites !== 'undefined') {
-                  sprites.forEach((sprite, index) => {
-                    const original = originalSprites[index];
-                    if (original && (sprite.x !== original.x || sprite.y !== original.y || sprite.size !== original.size || sprite.color !== original.color)) {
-                      context.spriteUpdates.set(sprite.id, {
-                        x: Math.round(sprite.x),
-                        y: Math.round(sprite.y),
-                        size: sprite.size,
-                        color: sprite.color
-                      });
-                    }
-                  });
-                }
-                `
-              );
-              executeSetup(
-                p, spriteContext, animatedPositionsRef,
-                p.createCanvas.bind(p), p.background.bind(p), p.fill.bind(p), 
-                p.stroke.bind(p), p.noStroke.bind(p), p.strokeWeight.bind(p),
-                p.circle.bind(p), p.ellipse.bind(p), p.rect.bind(p)
-              );
-
-              // Apply any sprite updates that were recorded
-              spriteContext.spriteUpdates.forEach((updates, spriteId) => {
-                console.log('Applying sprite update to React state:', spriteId, updates);
-                updateSpriteRef.current(spriteId, updates);
-                
-                // Also update persistent sprites
-                const spriteIndex = persistentSprites.findIndex(s => s.id === spriteId);
-                if (spriteIndex !== -1) {
-                  Object.assign(persistentSprites[spriteIndex], updates);
-                  // Update ref so toggle function can access current positions
-                  persistentSpritesRef.current = [...persistentSprites];
-                }
-              });
+                addDebugLog(0, 'Setup completed', 'info');
+              } else {
+                addDebugLog(0, 'No setup function found', 'info');
+              }
             }
-          } catch (error) {
-            console.warn('Setup code execution error:', error);
+            `
+          );
+          const SpriteClass = (window as any).Sprite || (q as any).Sprite;
+          executeAllCode(
+            q, worldRef.current, p5playSpritesRef.current, addDebugLog, codeExecutionScopeRef.current, SpriteClass,
+            q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
+            q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
+            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY
+          );
+          } catch (error: any) {
+          addDebugLog(0, `Setup execution error: ${error.message}`, 'info');
           }
       };
 
-      p.draw = () => {
-        p.background(255);
+      q.draw = () => {
+        q.background(255);
         
         // Only execute generated code if running
         if (isRunningRef.current) {
-          // Increment global frame counter only when running
-          globalFrameCountRef.current++;
+          // Update debug frame counter for display
+          setDebugFrameCount(prev => prev + 1);
           
-          // Update React state for debug display
-          setDebugFrameCount(globalFrameCountRef.current);
+
+          
           try {
-            const { draw } = parseGeneratedCode(currentGeneratedCodeRef.current);
-            
-          // Create sprite context that tracks changes
-          const spriteContext = {
-              originalSprites: persistentSprites.map(s => ({ ...s })),
-            spriteUpdates: new Map()
-          };
-
-            // Execute draw code if it exists, otherwise execute the whole code
-            const codeToExecute = draw || (currentGeneratedCodeRef.current.includes('function') ? '' : currentGeneratedCodeRef.current);
-
-            // Create a safe execution environment that includes ALL generated code
+            // Execute the draw logic from the persistent scope
           const executeCode = new Function(
-              'p', 'mouseX', 'mouseY', 'context', 'globalFrameCount', 'animatedPositionsRef', 'addDebugLog',
+              'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'addDebugLog', 'codeScope', 'Sprite',
             'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
             'circle', 'ellipse', 'rect',
             `
-              // Use persistent sprites that accumulates changes
-              const persistentSpritesData = context.originalSprites;
+              // Execute within the persistent scope that contains our variables
+              with (codeScope) {
+                // Update global mouse coordinates for async functions
+                window.globalMouseX = q.mouseX;
+                window.globalMouseY = q.mouseY;
             
-              // Store original values to detect changes (before generated code runs)
-              const originalSprites = persistentSpritesData.map(s => ({ ...s }));
-              
-              // Debug: Log initial sprite positions
-              console.log('Before execution - sprites positions:', persistentSpritesData.map(s => ({id: s.id, x: s.x, y: s.y})));
-              
-              // Execute ALL the generated code, including functions
-              ` + currentGeneratedCodeRef.current + `
-              
-              // DON'T reset sprite positions here - let the generated code control movement
-              // Only sync non-position properties and initialize on first run
-              if (typeof sprites !== 'undefined' && sprites.length > 0) {
-                sprites.forEach((sprite, index) => {
-                  const persistentSprite = persistentSpritesData[index];
-                  if (persistentSprite) {
-                    // Always sync non-position properties
-                    sprite.size = persistentSprite.size;
-                    sprite.color = persistentSprite.color;
-                    sprite.visible = persistentSprite.visible;
-                    sprite.waitUntilFrame = persistentSprite.waitUntilFrame || 0;
-                    sprite.actionQueue = persistentSprite.actionQueue || [];
-                    sprite.currentActionIndex = persistentSprite.currentActionIndex || 0;
-                    sprite.actionState = persistentSprite.actionState || 'ready';
-                    sprite.id = persistentSprite.id;
-                    sprite.name = persistentSprite.name;
-                    
-                    // Only sync positions on first frame - after that, let animation code control positions
-                    if (globalFrameCount <= 1) {
-                      sprite.x = persistentSprite.x;
-                      sprite.y = persistentSprite.y;
-                      console.log('Initial sprite position set: ' + sprite.id + ' at (' + sprite.x + ', ' + sprite.y + ')');
-                    }
-                  }
-                });
-            
-                // Note: Wait frame timing is now handled by the action queue system
-                // The action queue manages its own wait states to avoid race conditions
-              }
-              
-              // Now call draw() which will execute drawSprites() with the updated sprites
+                // Execute draw function if it exists in persistent scope
               if (typeof draw === 'function') {
                 draw();
               }
-            
-              // Debug: Log sprite positions after execution
-              if (typeof sprites !== 'undefined') {
-                console.log('After execution - sprites positions:', sprites.map(s => ({id: s.id, x: s.x, y: s.y})));
-                
-                // Check for sprite changes and record them (including wait states)
-                sprites.forEach((sprite, index) => {
-                  const original = originalSprites[index];
-                  if (original && (
-                    sprite.x !== original.x || 
-                    sprite.y !== original.y || 
-                    sprite.size !== original.size || 
-                    sprite.color !== original.color ||
-                    sprite.waitUntilFrame !== (original.waitUntilFrame || 0) ||
-                    sprite.currentActionIndex !== (original.currentActionIndex || 0) ||
-                    sprite.actionState !== (original.actionState || 'ready')
-                  )) {
-                    console.log('Detected sprite change:', {
-                      id: sprite.id,
-                      from: {x: original.x, y: original.y, actionIndex: original.currentActionIndex || 0, state: original.actionState || 'ready'},
-                      to: {x: sprite.x, y: sprite.y, actionIndex: sprite.currentActionIndex || 0, state: sprite.actionState || 'ready'}
-                    });
-                    // Store animated positions in ref to persist across sketch recreations
-                    animatedPositionsRef.current.set(sprite.id, {
-                      x: Math.round(sprite.x),
-                      y: Math.round(sprite.y)
-                    });
-                    
-                    context.spriteUpdates.set(sprite.id, {
-                      x: Math.round(sprite.x),
-                      y: Math.round(sprite.y),
-                      size: sprite.size,
-                      color: sprite.color,
-                      waitUntilFrame: sprite.waitUntilFrame || 0,
-                      actionQueue: sprite.actionQueue || [],
-                      currentActionIndex: sprite.currentActionIndex || 0,
-                      actionState: sprite.actionState || 'ready'
-                    });
-                  }
-              });
             }
             `
           );
 
+          const SpriteClass = (window as any).Sprite || (q as any).Sprite;
           executeCode(
-              p, p.mouseX, p.mouseY, spriteContext, globalFrameCountRef.current, animatedPositionsRef, addDebugLog,
-            p.createCanvas.bind(p), p.background.bind(p), p.fill.bind(p), 
-            p.stroke.bind(p), p.noStroke.bind(p), p.strokeWeight.bind(p),
-            p.circle.bind(p), p.ellipse.bind(p), p.rect.bind(p)
+              q, worldRef.current, p5playSpritesRef.current, q.mouseX, q.mouseY, 
+              addDebugLog, codeExecutionScopeRef.current, SpriteClass,
+              q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
+              q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
+              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q)
           );
 
-          // Apply any sprite updates that were recorded
-          spriteContext.spriteUpdates.forEach((updates, spriteId) => {
-              console.log('🔄 Applying sprite update:', spriteId, updates);
-              console.log('🔄 Current persistent sprite before update:', persistentSprites.find(s => s.id === spriteId));
-              console.log('🔄 Current animated position before update:', animatedPositionsRef.current.get(spriteId));
-              
-              // Update persistent sprites first
-              const spriteIndex = persistentSprites.findIndex(s => s.id === spriteId);
-              if (spriteIndex !== -1) {
-                Object.assign(persistentSprites[spriteIndex], updates);
-                // Update ref so toggle function can access current positions
-                persistentSpritesRef.current = [...persistentSprites];
-                console.log('🔄 Updated persistent sprite:', persistentSprites[spriteIndex]);
+          } catch (error: any) {
+            addDebugLog(0, `Execution error: ${error.message}`, 'info');
+          }
               }
               
-              // Always update React state to keep coordinates in sync, even while dragging
-              // This ensures the UI shows real-time coordinates and dragging uses current positions
-              if (persistentDragState.isDragging && persistentDragState.spriteId === spriteId) {
-                console.log('🔄 Updating React state for dragged sprite (maintaining animation sync):', spriteId);
-                // Update React state but don't interfere with drag visuals
-                updateSpriteRef.current(spriteId, updates);
-              } else {
-                // Normal update for non-dragged sprites
-                console.log('🔄 Updating React state for sprite:', spriteId, updates);
-                updateSpriteRef.current(spriteId, updates);
-              }
+        // p5play automatically draws all sprites with q5.js - no need for manual drawSprites()
+      };
+
+      // Mouse handling for sprite interaction
+      q.mousePressed = () => {
+        if (!isRunningRef.current) {
+          // Check if mouse is over any p5play sprite for dragging
+          p5playSpritesRef.current.forEach((p5playSprite, spriteId) => {
+            if (p5playSprite.mouse.pressing()) {
+              persistentDragState.isDragging = true;
+              persistentDragState.spriteId = spriteId;
+              persistentDragState.offsetX = q.mouseX - p5playSprite.x;
+              persistentDragState.offsetY = q.mouseY - p5playSprite.y;
+              persistentDragState.startX = p5playSprite.x;
+              persistentDragState.startY = p5playSprite.y;
+              persistentDragState.hasMoved = false;
+              
+              selectSpriteRef.current(spriteId as any);
+          }
           });
-
-        } catch (error) {
-          console.warn('Generated code execution error:', error);
-        }
-        }
-        
-        // Only draw sprites manually when paused OR when generated code doesn't handle sprite drawing
-        // This prevents duplicate sprites when both systems are drawing
-        const shouldDrawSpritesManually = !isRunningRef.current || !currentGeneratedCodeRef.current.includes('drawSprites()');
-        
-        if (shouldDrawSpritesManually) {
-          // Draw all sprites with real-time drag feedback (when paused or no generated drawing)
-          spritesRef.current.forEach(sprite => {
-          if (sprite.visible === false) return;
-          
-          let drawX = sprite.x;
-          let drawY = sprite.y;
-          
-          // Show real-time drag position if we're dragging this sprite
-          if (persistentDragState.isDragging && persistentDragState.spriteId === sprite.id) {
-            drawX = p.mouseX - persistentDragState.offsetX;
-            drawY = p.mouseY - persistentDragState.offsetY;
-            
-              // Constrain to canvas (using same relaxed constraints as final position)
-              const minBorder = 5;
-              drawX = Math.max(minBorder, Math.min(480 - minBorder, drawX));
-              drawY = Math.max(minBorder, Math.min(360 - minBorder, drawY));
-            
-            // Track movement
-            const moveDistance = Math.sqrt(
-              Math.pow(drawX - persistentDragState.startX, 2) + 
-              Math.pow(drawY - persistentDragState.startY, 2)
-            );
-            persistentDragState.hasMoved = moveDistance > 3;
-          }
-          
-          p.push();
-          
-          // Enhanced shadow for dragged sprite
-          if (persistentDragState.isDragging && persistentDragState.spriteId === sprite.id && persistentDragState.hasMoved) {
-            p.fill(0, 0, 0, 60);
-            p.noStroke();
-            p.ellipse(drawX + 4, drawY + 4, sprite.size || 30, sprite.size || 30);
-          }
-          
-          // Main sprite
-          p.fill(sprite.color || '#ff6b6b');
-          p.stroke(255);
-          p.strokeWeight(2);
-          p.ellipse(drawX, drawY, sprite.size || 30, sprite.size || 30);
-          
-          // Highlight
-          p.fill(255, 255, 255, 120);
-          p.noStroke();
-          const size = sprite.size || 30;
-          p.ellipse(drawX - size * 0.15, drawY - size * 0.15, size * 0.3, size * 0.3);
-          
-          p.pop();
-        });
-        } else {
-          // When generated code is handling sprite drawing, we still need to show drag feedback
-          // Draw only the currently dragged sprite as an overlay
-          if (persistentDragState.isDragging && persistentDragState.spriteId) {
-            const draggedSprite = spritesRef.current.find(s => s.id === persistentDragState.spriteId);
-            if (draggedSprite) {
-              const drawX = p.mouseX - persistentDragState.offsetX;
-              const drawY = p.mouseY - persistentDragState.offsetY;
-              
-              // Constrain to canvas (using same relaxed constraints)
-              const size = draggedSprite.size || 30;
-              const minBorder = 5;
-              const constrainedX = Math.max(minBorder, Math.min(480 - minBorder, drawX));
-              const constrainedY = Math.max(minBorder, Math.min(360 - minBorder, drawY));
-              
-              // Track movement
-              const moveDistance = Math.sqrt(
-                Math.pow(constrainedX - persistentDragState.startX, 2) + 
-                Math.pow(constrainedY - persistentDragState.startY, 2)
-              );
-              persistentDragState.hasMoved = moveDistance > 3;
-              
-              if (persistentDragState.hasMoved) {
-                p.push();
-                
-                // Semi-transparent drag preview
-                p.fill(draggedSprite.color || '#ff6b6b');
-                p.stroke(255);
-                p.strokeWeight(2);
-                p.ellipse(constrainedX, constrainedY, size, size);
-                
-                // Add the highlight/glare to match original sprite appearance
-                p.fill(255, 255, 255, 120);
-                p.noStroke();
-                p.ellipse(constrainedX - size * 0.15, constrainedY - size * 0.15, size * 0.3, size * 0.3);
-                
-                // Drag shadow
-                p.fill(0, 0, 0, 60);
-                p.noStroke();
-                p.ellipse(constrainedX + 4, constrainedY + 4, size, size);
-                
-                p.pop();
-              }
-            }
-          }
-        }
-      };
-
-      p.mousePressed = () => {
-        console.log('Raw p5 mouse coords:', p.mouseX, p.mouseY);
-        
-        // Check canvas bounds
-        if (p.mouseX < 0 || p.mouseX > 480 || p.mouseY < 0 || p.mouseY > 360) {
-          console.log('Click outside canvas bounds');
-          return;
-        }
-        
-        let spriteClicked = false;
-        
-        // Allow sprite dragging regardless of pause/run state
-        // Check sprites from top to bottom using current sprite state
-        const currentSprites = spritesRef.current;
-        for (let i = currentSprites.length - 1; i >= 0; i--) {
-          const sprite = currentSprites[i];
-          if (sprite.visible === false) continue;
-          
-          const distance = Math.sqrt((p.mouseX - sprite.x) ** 2 + (p.mouseY - sprite.y) ** 2);
-          
-          if (distance <= (sprite.size || 30) / 2) {
-            console.log('Sprite clicked:', sprite.id, 'at position:', sprite.x, sprite.y);
-            console.log('Mouse at:', p.mouseX, p.mouseY, 'Distance:', distance);
-            
-            // Use current animated position if available, otherwise use React state
-            const animatedPos = animatedPositionsRef.current.get(sprite.id);
-            const currentX = animatedPos && isRunningRef.current ? animatedPos.x : sprite.x;
-            const currentY = animatedPos && isRunningRef.current ? animatedPos.y : sprite.y;
-            
-            console.log('Using position for drag:', currentX, currentY, animatedPos ? '(animated)' : '(react state)');
-            
-            // Set up persistent drag state with current animated coordinates
-            persistentDragState = {
-              isDragging: true,
-              spriteId: sprite.id,
-              offsetX: p.mouseX - currentX,
-              offsetY: p.mouseY - currentY,
-              startX: currentX,
-              startY: currentY,
-              hasMoved: false
-            };
-            
-            console.log('Drag state set - Offset:', persistentDragState.offsetX, persistentDragState.offsetY);
-            
-            // Select sprite immediately
-            selectSpriteRef.current(sprite);
-            spriteClicked = true;
-            break;
-          }
         }
 
-        // Execute generated mousePressed code only if no sprite was clicked AND canvas is running
-        if (!spriteClicked && isRunningRef.current) {
-          console.log('No sprite clicked, checking for mousePressed code');
-          
-          try {
-            const { mousePressed } = parseGeneratedCode(currentGeneratedCodeRef.current);
-          
-            if (mousePressed) {
-              console.log('Found mousePressed code, executing:', mousePressed);
-            const spriteContext = {
-                originalSprites: spritesRef.current.map(s => ({ ...s })),
-              spriteUpdates: new Map()
-            };
-
+        // Execute mousePressed code from generated code
+        try {
             const executeMousePressed = new Function(
-                'p', 'mouseX', 'mouseY', 'context', 'animatedPositionsRef',
-              'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
-              'circle', 'ellipse', 'rect',
-              `
-              console.log('Executing mousePressed code');
-                const persistentSpritesData = context.originalSprites;
-              
-                // Store original values to detect changes (before generated code runs)
-                const originalSprites = persistentSpritesData.map(s => ({ ...s }));
-                
-                // Execute ALL the generated code first (includes sprite declarations)
-                ` + currentGeneratedCodeRef.current + `
-                
-                // After generated code runs, update the sprites array with persistent data
-                if (typeof sprites !== 'undefined' && sprites.length > 0) {
-                  // Update the generated sprites array with our persistent data
-                  persistentSpritesData.forEach((persistentSprite, index) => {
-                    if (sprites[index]) {
-                      sprites[index].x = persistentSprite.x;
-                      sprites[index].y = persistentSprite.y;
-                      sprites[index].size = persistentSprite.size;
-                      sprites[index].color = persistentSprite.color;
-                    }
-                  });
-                }
-                
-                // Now execute the mousePressed function if it exists
-                if (typeof mousePressed === 'function') {
-                  mousePressed();
+            'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'codeScope', 'Sprite',
+            `
+            with (codeScope) {
+              const sprites = Array.from(p5playSprites.values());
+              // Execute mousePressed function if it exists in persistent scope
+                if (typeof codeScope.mousePressed === 'function') {
+                  codeScope.mousePressed();
               }
-              
-                // Check for sprite changes and record them
-                if (typeof sprites !== 'undefined') {
-                  sprites.forEach((sprite, index) => {
-                    const original = originalSprites[index];
-                    if (original && (sprite.x !== original.x || sprite.y !== original.y || sprite.size !== original.size || sprite.color !== original.color)) {
-                      console.log('Sprite position changed from', original.x, original.y, 'to', sprite.x, sprite.y);
-                      context.spriteUpdates.set(sprite.id, {
-                        x: Math.round(sprite.x),
-                        y: Math.round(sprite.y),
-                        size: sprite.size,
-                        color: sprite.color
-                      });
-                    }
-                  });
-              }
-              `
-            );
-
-            executeMousePressed(
-                p, p.mouseX, p.mouseY, spriteContext, animatedPositionsRef,
-              p.createCanvas.bind(p), p.background.bind(p), p.fill.bind(p), 
-              p.stroke.bind(p), p.noStroke.bind(p), p.strokeWeight.bind(p),
-              p.circle.bind(p), p.ellipse.bind(p), p.rect.bind(p)
-            );
-
-            // Apply sprite updates
-            spriteContext.spriteUpdates.forEach((updates, spriteId) => {
-                console.log('Applying sprite update to React state:', spriteId, updates);
-                updateSpriteRef.current(spriteId, updates);
-            });
-            } else {
-              console.log('No mousePressed function found in generated code');
             }
+            `
+          );
+          const SpriteClass = (window as any).Sprite || (q as any).Sprite;
+          executeMousePressed(q, worldRef.current, p5playSpritesRef.current, q.mouseX, q.mouseY, codeExecutionScopeRef.current, SpriteClass);
+          } catch (error: any) {
+          addDebugLog(0, `MousePressed error: ${error.message}`, 'info');
+              }
+      };
 
-          } catch (error) {
-            console.error('Mouse press execution error:', error);
+      q.mouseDragged = () => {
+        if (persistentDragState.isDragging && persistentDragState.spriteId && !isRunningRef.current) {
+          const newX = q.mouseX - persistentDragState.offsetX;
+          const newY = q.mouseY - persistentDragState.offsetY;
+          
+          // Update p5play sprite position
+          const p5playSprite = p5playSpritesRef.current.get(persistentDragState.spriteId);
+          if (p5playSprite) {
+            p5playSprite.x = newX;
+            p5playSprite.y = newY;
+            
+            // Also update React state immediately for responsive UI
+            updateSpriteRef.current(persistentDragState.spriteId, { x: Math.round(newX), y: Math.round(newY) });
+            persistentDragState.hasMoved = true;
           }
-        } else if (!spriteClicked && !isRunningRef.current) {
-          console.log('Canvas is paused, not executing mousePressed code');
         }
       };
 
-      p.mouseReleased = () => {
-        console.log('Canvas mouseReleased called', 'isDragging:', persistentDragState.isDragging);
-        
-        // Process drag completion if we were dragging
+      q.mouseReleased = () => {
         if (persistentDragState.isDragging && persistentDragState.spriteId) {
-          console.log('Completing drag for sprite:', persistentDragState.spriteId, 'hasMoved:', persistentDragState.hasMoved);
-          console.log('Current mouse:', p.mouseX, p.mouseY);
-          console.log('Stored offset:', persistentDragState.offsetX, persistentDragState.offsetY);
-          
-          if (persistentDragState.hasMoved) {
-            // Calculate final position using current mouse position and proper offset
-            let finalX = p.mouseX - persistentDragState.offsetX;
-            let finalY = p.mouseY - persistentDragState.offsetY;
-            
-            console.log('Calculated final position before constraints:', finalX, finalY);
-            
-            // Find the sprite size for constraint calculation
-            const currentSprite = spritesRef.current.find(s => s.id === persistentDragState.spriteId);
-            const size = currentSprite?.size || 30;
-            const radius = size / 2;
-            
-            // More relaxed constraints - allow sprites to be dragged closer to edges
-            const minBorder = 5; // Minimum 5px from edge instead of full radius
-            finalX = Math.max(minBorder, Math.min(480 - minBorder, finalX));
-            finalY = Math.max(minBorder, Math.min(360 - minBorder, finalY));
-            
-            console.log('Final position after constraints:', finalX, finalY, 'radius:', radius);
-            
-            // Only update if the position is valid (using same constraints)
-            if (finalX >= minBorder && finalX <= 480 - minBorder && finalY >= minBorder && finalY <= 360 - minBorder) {
-              const finalPosition = {
-              x: Math.round(finalX),
-              y: Math.round(finalY)
-              };
-              
-              updateSpriteRef.current(persistentDragState.spriteId, finalPosition);
-              console.log('Updated sprite to:', finalPosition.x, finalPosition.y);
-              
-              // Update animated positions ref so animation continues from new position
-              animatedPositionsRef.current.set(persistentDragState.spriteId, finalPosition);
-              console.log('Updated animated position ref for sprite:', persistentDragState.spriteId, finalPosition);
-              
-              // Also update persistent sprites immediately
-              const spriteIndex = persistentSprites.findIndex(s => s.id === persistentDragState.spriteId);
-              if (spriteIndex !== -1) {
-                persistentSprites[spriteIndex].x = finalPosition.x;
-                persistentSprites[spriteIndex].y = finalPosition.y;
-                console.log('Updated persistent sprite position:', persistentSprites[spriteIndex]);
-              }
-            } else {
-              console.warn('Invalid final position, not updating sprite');
-            }
-          } else {
-            console.log('Sprite did not move enough, no position update');
+          const p5playSprite = p5playSpritesRef.current.get(persistentDragState.spriteId);
+          if (p5playSprite && persistentDragState.hasMoved) {
+            // Final position sync
+            updateSpriteRef.current(persistentDragState.spriteId, {
+              x: Math.round(p5playSprite.x),
+              y: Math.round(p5playSprite.y)
+            });
+
           }
-        }
-        
-        // Clear persistent drag state
-        persistentDragState = {
-          isDragging: false,
-          spriteId: null,
-          offsetX: 0,
-          offsetY: 0,
-          startX: 0,
-          startY: 0,
-          hasMoved: false
-        };
+          
+          // Reset drag state
+          persistentDragState.isDragging = false;
+          persistentDragState.spriteId = null;
+          persistentDragState.hasMoved = false;
+              }
       };
     };
 
-    p5Instance.current = new p5(sketch, canvasRef.current);
+    // Create new q5.js instance with p5play
+    q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
 
     return () => {
-      if (p5Instance.current) {
-        p5Instance.current.remove();
+      if (q5Instance.current) {
+        q5Instance.current.remove();
+        q5Instance.current = null;
       }
     };
-  }, [resetCounter]); // Only recreate on manual reset, not when code changes
+  }, [resetCounter, librariesReady]); // Now depends on librariesReady
+
+  // Show loading state while libraries are loading
+  if (loadingError) {
+  return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center gap-2 p-3 bg-red-50 border-b border-red-200">
+          <div className="text-sm text-red-600">❌ Library Loading Error</div>
+        </div>
+        <div className="flex-1 flex items-center justify-center bg-white">
+          <div className="text-center">
+            <div className="text-red-500 text-lg mb-2">⚠️ Failed to Load Libraries</div>
+            <p className="text-gray-600 mb-4">{loadingError}</p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!librariesReady) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center gap-2 p-3 bg-gray-50 border-b">
+          <div className="text-sm text-gray-600">Loading q5.js + p5play...</div>
+        </div>
+        <div className="flex-1 flex items-center justify-center bg-white">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+            <p className="mt-2 text-gray-600">Loading physics engine and game framework...</p>
+            <p className="mt-1 text-sm text-gray-500">This may take a few seconds on first load</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+
 
   return (
-    <div className="w-full h-full bg-gray-100 flex flex-col p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-sm font-semibold text-gray-700">Canvas</div>
-        <div className="flex items-center gap-3">
+    <div className="flex flex-col h-full">
+      {/* Controls */}
+      <div className="flex items-center gap-2 p-3 bg-gray-50 border-b">
           <button
             onClick={toggleRunning}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+          className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
               isRunning 
-                ? 'bg-orange-500 text-white hover:bg-orange-600' 
+              ? 'bg-red-500 text-white hover:bg-red-600' 
                 : 'bg-green-500 text-white hover:bg-green-600'
             }`}
           >
-            {isRunning ? (
-              <>
-                <Pause size={14} />
-                <span>Pause</span>
-              </>
-            ) : (
-              <>
-                <Play size={14} />
-                <span>Run</span>
-              </>
-            )}
+          {isRunning ? <Pause size={16} /> : <Play size={16} />}
+          {isRunning ? 'Pause' : 'Run'}
           </button>
+        
           <button
             onClick={resetCanvas}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 bg-blue-500 text-white hover:bg-blue-600"
+          className="flex items-center gap-1 px-3 py-1.5 bg-gray-500 text-white rounded text-sm font-medium hover:bg-gray-600 transition-colors"
           >
-            <RotateCcw size={14} />
-            <span>Reset</span>
+          <RotateCcw size={16} />
+          Reset
           </button>
-        <div className="text-xs text-gray-500">480 × 360</div>
-        </div>
-      </div>
-      
-      <div className="flex-1 flex items-center justify-center relative">
-        <div 
-          ref={canvasRef}
-          className="bg-white shadow-lg border border-gray-300"
-          style={{ width: '480px', height: '360px' }}
-        />
         
-        {/* Subtle paused indicator in corner */}
-        {!isRunning && (
-          <div className="absolute top-2 left-2 pointer-events-none">
-            <div className="bg-gray-800 bg-opacity-80 text-white px-2 py-1 rounded text-xs flex items-center gap-1">
-              <Play size={12} />
-              <span>Paused</span>
-            </div>
+        <div className="text-sm text-gray-600 ml-2">
+          F:{debugFrameCount} | {isRunning ? 'RUN' : 'PAUSE'} | M:({Math.round((window as any).globalMouseX || 0)}, {Math.round((window as any).globalMouseY || 0)})
+        </div>
+        
+        {debugInfo.currentAction && (
+          <div className="text-sm text-blue-600 ml-4">
+            Action: {debugInfo.currentAction} 
+            {debugInfo.actionIndex !== undefined && ` (${debugInfo.actionIndex + 1})`}
+            {debugInfo.isWaiting && debugInfo.waitUntilFrame && 
+              ` - Waiting until frame ${debugInfo.waitUntilFrame}`
+            }
           </div>
         )}
+      </div>
         
-        {/* Frame counter - matching existing UI style */}
-        <div className="absolute top-2 right-2 pointer-events-none">
-          <div className="bg-gray-800 bg-opacity-80 text-white px-2 py-1 rounded text-xs flex items-center gap-1">
-            <span className="text-blue-300">Frame:</span>
-            <span className="font-mono">{debugFrameCount}</span>
-          </div>
+      {/* Canvas and Debug Log */}
+      <div className="flex flex-1">
+        {/* Canvas */}
+        <div className="flex-1 bg-white">
+          <div ref={canvasRef} className="w-full h-full" />
         </div>
+        
+
       </div>
     </div>
   );

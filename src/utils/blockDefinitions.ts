@@ -28,6 +28,14 @@ export const blockCategories: BlockCategory[] = [
         color: '#dc2626',
         type: 'event',
         code: 'function mousePressed() {\n${content}\n}'
+      },
+      {
+        id: 'when_sprite_clicked',
+        label: 'when sprite clicked',
+        category: 'Events',
+        color: '#dc2626',
+        type: 'event',
+        code: 'if (sprites[0].mouse.pressing()) {\n${content}\n}'
       }
     ]
   },
@@ -36,15 +44,75 @@ export const blockCategories: BlockCategory[] = [
     color: '#7c3aed',
     blocks: [
       {
-        id: 'wait_frames',
-        label: 'wait ⏱️ frames',
+        id: 'repeat_forever',
+        label: 'repeat forever',
         category: 'Control',
         color: '#7c3aed',
         type: 'control',
+        code: '${content}' // This will be handled by async loops
+      },
+      {
+        id: 'if_condition',
+        label: 'if',
+        category: 'Control',
+        color: '#7c3aed',
+        type: 'action',
+        height: 'tall',
+        code: 'if (${condition}) {\n  ${then}\n} else {\n  ${else}\n}',
+        labeledConnections: {
+          inputs: [
+            { label: 'condition', side: 'left', type: 'boolean' }
+          ],
+          outputs: [
+            { label: 'then', side: 'right', type: 'flow' },
+            { label: 'else', side: 'right', type: 'flow' }
+          ]
+        }
+      },
+      {
+        id: 'while_loop',
+        label: 'while',
+        category: 'Control',
+        color: '#7c3aed',
+        type: 'action',
+        height: 'tall',
+        code: 'while (${condition}) {\n  ${do}\n}',
+        labeledConnections: {
+          inputs: [
+            { label: 'condition', side: 'left', type: 'boolean' }
+          ],
+          outputs: [
+            { label: 'do', side: 'right', type: 'flow' }
+          ]
+        }
+      },
+      {
+        id: 'repeat_times',
+        label: 'repeat',
+        category: 'Control',
+        color: '#7c3aed',
+        type: 'action',
+        height: 'medium',
+        inputs: [
+          { type: 'number', name: 'times', defaultValue: 10 }
+        ],
+        code: 'for (let i = 0; i < ${times}; i++) {\n  ${do}\n}',
+        labeledConnections: {
+          outputs: [
+            { label: 'do', side: 'right', type: 'flow' }
+          ]
+        }
+      },
+      {
+        id: 'wait_frames',
+        label: 'wait frames',
+        category: 'Control',
+        color: '#7c3aed',
+        type: 'action',
         inputs: [
           { type: 'number', name: 'frames', defaultValue: 30 }
         ],
-        code: 'sprites[0].waitUntilFrame = globalFrameCount + ${frames};'
+        code: 'await waitFrames(${frames});'
       }
     ]
   },
@@ -58,7 +126,7 @@ export const blockCategories: BlockCategory[] = [
         category: 'Drawing',
         color: '#059669',
         type: 'action',
-        code: 'circle(mouseX, mouseY, 50);'
+        code: 'circle((window.globalMouseX || 0), (window.globalMouseY || 0), 50);'
       },
       {
         id: 'set_fill',
@@ -119,6 +187,18 @@ export const blockCategories: BlockCategory[] = [
           { type: 'number', name: 'size', defaultValue: 30 }
         ],
         code: 'circle(sprites[0].x, sprites[0].y, ${size});'
+      },
+      {
+        id: 'draw_trail',
+        label: 'draw trail behind sprite',
+        category: 'Drawing',
+        color: '#059669',
+        type: 'action',
+        inputs: [
+          { type: 'text', name: 'color', defaultValue: 'blue' },
+          { type: 'number', name: 'size', defaultValue: 5 }
+        ],
+        code: 'fill("${color}"); circle(sprites[0].x, sprites[0].y, ${size});'
       }
     ]
   },
@@ -136,7 +216,7 @@ export const blockCategories: BlockCategory[] = [
           { type: 'number', name: 'x', defaultValue: 10 },
           { type: 'number', name: 'y', defaultValue: 10 }
         ],
-        code: 'sprites[0].x += ${x}; sprites[0].y += ${y};'
+        code: 'updateSprite(sprites[0].id, {x: sprites[0].x + ${x}, y: sprites[0].y + ${y}});'
       },
       {
         id: 'set_sprite_position',
@@ -148,7 +228,7 @@ export const blockCategories: BlockCategory[] = [
           { type: 'number', name: 'x', defaultValue: 240 },
           { type: 'number', name: 'y', defaultValue: 180 }
         ],
-        code: 'sprites[0].x = ${x}; sprites[0].y = ${y};'
+        code: 'updateSprite(sprites[0].id, {x: ${x}, y: ${y}});'
       },
       {
         id: 'move_to_mouse',
@@ -156,7 +236,51 @@ export const blockCategories: BlockCategory[] = [
         category: 'Motion',
         color: '#2563eb',
         type: 'action',
-        code: 'sprites[0].x = mouseX; sprites[0].y = mouseY;'
+        code: 'updateSprite(sprites[0].id, {x: (window.globalMouseX || 0), y: (window.globalMouseY || 0)});'
+      },
+      {
+        id: 'glide_to_position',
+        label: 'glide to position',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'x', defaultValue: 240 },
+          { type: 'number', name: 'y', defaultValue: 180 },
+          { type: 'number', name: 'speed', defaultValue: 2 }
+        ],
+        code: 'sprites[0].moveTo(${x}, ${y}, ${speed});'
+      },
+      {
+        id: 'glide_to_mouse',
+        label: 'glide to mouse',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'speed', defaultValue: 2 }
+        ],
+        code: 'sprites[0].moveTo((window.globalMouseX || 0), (window.globalMouseY || 0), ${speed});'
+      },
+      {
+        id: 'set_velocity',
+        label: 'set velocity',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'vx', defaultValue: 5 },
+          { type: 'number', name: 'vy', defaultValue: 0 }
+        ],
+        code: 'sprites[0].setVelocity(${vx}, ${vy});'
+      },
+      {
+        id: 'bounce_edges',
+        label: 'bounce off edges',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        code: 'if (sprites[0].x < 0 || sprites[0].x > 480) sprites[0].vel.x *= -1; if (sprites[0].y < 0 || sprites[0].y > 360) sprites[0].vel.y *= -1;'
       },
       {
         id: 'change_sprite_color',
@@ -167,7 +291,7 @@ export const blockCategories: BlockCategory[] = [
         inputs: [
           { type: 'text', name: 'color', defaultValue: 'red' }
         ],
-        code: 'sprites[0].color = "${color}";'
+        code: 'updateSprite(sprites[0].id, {color: "${color}"});'
       },
       {
         id: 'change_sprite_size',
@@ -178,7 +302,486 @@ export const blockCategories: BlockCategory[] = [
         inputs: [
           { type: 'number', name: 'size', defaultValue: 50 }
         ],
-        code: 'sprites[0].size = ${size};'
+        code: 'updateSprite(sprites[0].id, {size: ${size}});'
+      },
+      {
+        id: 'rotate_sprite',
+        label: 'rotate sprite',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'angle', defaultValue: 45 }
+        ],
+        code: 'sprites[0].rotation += ${angle};'
+      },
+      {
+        id: 'point_towards_mouse',
+        label: 'point towards mouse',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        code: 'sprites[0].rotation = atan2((window.globalMouseY || 0) - sprites[0].y, (window.globalMouseX || 0) - sprites[0].x) * 180 / PI;'
+      }
+    ]
+  },
+  {
+    name: 'Physics',
+    color: '#f59e0b',
+    blocks: [
+      {
+        id: 'enable_physics',
+        label: 'enable physics',
+        category: 'Physics',
+        color: '#f59e0b',
+        type: 'action',
+        code: 'sprites[0].collider = "dynamic";'
+      },
+      {
+        id: 'disable_physics',
+        label: 'disable physics',
+        category: 'Physics',
+        color: '#f59e0b',
+        type: 'action',
+        code: 'sprites[0].collider = "none";'
+      },
+      {
+        id: 'apply_force',
+        label: 'apply force',
+        category: 'Physics',
+        color: '#f59e0b',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'fx', defaultValue: 0 },
+          { type: 'number', name: 'fy', defaultValue: -10 }
+        ],
+        code: 'sprites[0].applyForce(${fx}, ${fy});'
+      },
+      {
+        id: 'set_gravity',
+        label: 'set gravity',
+        category: 'Physics',
+        color: '#f59e0b',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'gravity', defaultValue: 10 }
+        ],
+        code: 'world.gravity.y = ${gravity};'
+      },
+      {
+        id: 'bounce_sprite',
+        label: 'make sprite bouncy',
+        category: 'Physics',
+        color: '#f59e0b',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'bounciness', defaultValue: 0.8 }
+        ],
+        code: 'sprites[0].bounciness = ${bounciness};'
+      },
+      {
+        id: 'set_friction',
+        label: 'set sprite friction',
+        category: 'Physics',
+        color: '#f59e0b',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'friction', defaultValue: 0.1 }
+        ],
+        code: 'sprites[0].friction = ${friction};'
+      }
+    ]
+  },
+  {
+    name: 'Sensing',
+    color: '#8b5cf6',
+    blocks: [
+      {
+        id: 'touching_mouse',
+        label: 'touching mouse?',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: 'sprites[0].mouse.hovering()',
+        labeledConnections: {
+          outputs: [
+            { label: 'touching', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'mouse_x',
+        label: 'mouse x',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: '(window.globalMouseX || 0)',
+        labeledConnections: {
+          outputs: [
+            { label: 'x', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'mouse_y',
+        label: 'mouse y',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: '(window.globalMouseY || 0)',
+        labeledConnections: {
+          outputs: [
+            { label: 'y', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'sprite_x',
+        label: 'sprite x position',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: 'sprites[0].x',
+        labeledConnections: {
+          outputs: [
+            { label: 'x', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'sprite_y',
+        label: 'sprite y position',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: 'sprites[0].y',
+        labeledConnections: {
+          outputs: [
+            { label: 'y', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'distance_to_mouse',
+        label: 'distance to mouse',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: 'dist(sprites[0].x, sprites[0].y, (window.globalMouseX || 0), (window.globalMouseY || 0))',
+        labeledConnections: {
+          outputs: [
+            { label: 'distance', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'sprite_speed',
+        label: 'sprite speed',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        code: 'sprites[0].speed',
+        labeledConnections: {
+          outputs: [
+            { label: 'speed', side: 'right', type: 'number' }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    name: 'Effects',
+    color: '#ec4899',
+    blocks: [
+      {
+        id: 'fade_sprite',
+        label: 'fade sprite',
+        category: 'Effects',
+        color: '#ec4899',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'opacity', defaultValue: 128 }
+        ],
+        code: 'updateSprite(sprites[0].id, {opacity: ${opacity}});'
+      },
+      {
+        id: 'hide_sprite',
+        label: 'hide sprite',
+        category: 'Effects',
+        color: '#ec4899',
+        type: 'action',
+        code: 'updateSprite(sprites[0].id, {visible: false});'
+      },
+      {
+        id: 'show_sprite',
+        label: 'show sprite',
+        category: 'Effects',
+        color: '#ec4899',
+        type: 'action',
+        code: 'updateSprite(sprites[0].id, {visible: true});'
+      },
+      {
+        id: 'scale_sprite',
+        label: 'scale sprite',
+        category: 'Effects',
+        color: '#ec4899',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'scale', defaultValue: 1.5 }
+        ],
+        code: 'updateSprite(sprites[0].id, {scale: ${scale}});'
+      },
+      {
+        id: 'tint_sprite',
+        label: 'tint sprite',
+        category: 'Effects',
+        color: '#ec4899',
+        type: 'action',
+        inputs: [
+          { type: 'text', name: 'color', defaultValue: 'red' }
+        ],
+        code: 'updateSprite(sprites[0].id, {tint: "${color}"});'
+      },
+      {
+        id: 'remove_tint',
+        label: 'remove tint',
+        category: 'Effects',
+        color: '#ec4899',
+        type: 'action',
+        code: 'updateSprite(sprites[0].id, {tint: null});'
+      }
+    ]
+  },
+  {
+    name: 'Logic',
+    color: '#16a34a',
+    blocks: [
+      {
+        id: 'boolean_true',
+        label: 'true',
+        category: 'Logic',
+        color: '#16a34a',
+        type: 'value',
+        code: 'true',
+        labeledConnections: {
+          outputs: [
+            { label: 'true', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'boolean_false',
+        label: 'false',
+        category: 'Logic',
+        color: '#16a34a',
+        type: 'value',
+        code: 'false',
+        labeledConnections: {
+          outputs: [
+            { label: 'false', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'and_operator',
+        label: 'and',
+        category: 'Logic',
+        color: '#16a34a',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} && ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'boolean' },
+            { label: 'B', side: 'left', type: 'boolean' }
+          ],
+          outputs: [
+            { label: 'result', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'or_operator',
+        label: 'or',
+        category: 'Logic',
+        color: '#16a34a',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} || ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'boolean' },
+            { label: 'B', side: 'left', type: 'boolean' }
+          ],
+          outputs: [
+            { label: 'result', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'not_operator',
+        label: 'not',
+        category: 'Logic',
+        color: '#16a34a',
+        type: 'value',
+        height: 'medium',
+        code: '(!${value})',
+        labeledConnections: {
+          inputs: [
+            { label: 'value', side: 'left', type: 'boolean' }
+          ],
+          outputs: [
+            { label: 'not', side: 'right', type: 'boolean' }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    name: 'Math',
+    color: '#ea580c',
+    blocks: [
+      {
+        id: 'add_numbers',
+        label: '+',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} + ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'sum', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'subtract_numbers',
+        label: '-',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} - ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'A-B', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'multiply_numbers',
+        label: '×',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} * ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'A×B', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'divide_numbers',
+        label: '÷',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} / ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'A÷B', side: 'right', type: 'number' }
+          ]
+        }
+      },
+      {
+        id: 'equals_comparison',
+        label: '=',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} === ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'A=B', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'greater_than',
+        label: '>',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} > ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'A>B', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'less_than',
+        label: '<',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        height: 'medium',
+        code: '(${A} < ${B})',
+        labeledConnections: {
+          inputs: [
+            { label: 'A', side: 'left', type: 'number' },
+            { label: 'B', side: 'left', type: 'number' }
+          ],
+          outputs: [
+            { label: 'A<B', side: 'right', type: 'boolean' }
+          ]
+        }
+      },
+      {
+        id: 'number_value',
+        label: 'number',
+        category: 'Math',
+        color: '#ea580c',
+        type: 'value',
+        inputs: [
+          { type: 'number', name: 'value', defaultValue: 0 }
+        ],
+        code: '${value}',
+        labeledConnections: {
+          outputs: [
+            { label: 'value', side: 'right', type: 'number' }
+          ]
+        }
       }
     ]
   }

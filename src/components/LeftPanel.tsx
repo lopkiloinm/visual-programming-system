@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Shapes, Code, Bug } from 'lucide-react';
+import { Shapes, Code, Bug, FileJson } from 'lucide-react';
 import { BlockPalette } from './BlockPalette';
 import { BlockWorkspace } from './BlockWorkspace';
 import { CodeEditor } from './CodeEditor';
+import { JsonEditor } from './JsonEditor';
 import { useSpriteContext } from '../contexts/SpriteContext';
 
 interface LeftPanelProps {
@@ -17,7 +18,7 @@ interface LeftPanelProps {
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning = false }) => {
   const [activeWorkspace, setActiveWorkspace] = useState<'stage' | string>('stage');
-  const [viewMode, setViewMode] = useState<'blocks' | 'code' | 'debug'>('blocks');
+  const [viewMode, setViewMode] = useState<'blocks' | 'code' | 'debug' | 'json'>('blocks');
   const { sprites, selectedSprite } = useSpriteContext();
   const debugLogScrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -82,6 +83,17 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning 
                 </span>
               )}
             </button>
+            <button
+              className={`flex items-center space-x-1 py-1 px-2 rounded-md transition-all duration-200 ${
+                viewMode === 'json'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-800'
+              }`}
+              onClick={() => setViewMode('json')}
+            >
+              <FileJson size={14} />
+              <span className="text-xs font-medium">JSON</span>
+            </button>
           </div>
         </div>
 
@@ -133,6 +145,10 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning 
         ) : viewMode === 'code' ? (
           <div className="flex-1">
             <CodeEditor />
+          </div>
+        ) : viewMode === 'json' ? (
+          <div className="flex-1">
+            <JsonEditor />
           </div>
         ) : (
           <div className="flex-1 flex flex-col bg-white">

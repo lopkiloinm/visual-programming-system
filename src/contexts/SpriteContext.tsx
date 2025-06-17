@@ -9,6 +9,9 @@ interface SpriteContextType {
   updateSprite: (id: string, updates: Partial<Sprite>) => void;
   selectSprite: (sprite: Sprite | null) => void;
   resetSpritesToInitial: () => void;
+  // Import/Export methods
+  clearSprites: () => Promise<void>;
+  importSprites: (sprites: Sprite[]) => Promise<void>;
 }
 
 const SpriteContext = createContext<SpriteContextType | undefined>(undefined);
@@ -61,6 +64,34 @@ export const SpriteProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setSelectedSprite(null);
   };
 
+  // Import/Export methods
+  const clearSprites = async (): Promise<void> => {
+    setSprites([]);
+    setInitialSprites([]);
+    setSelectedSprite(null);
+  };
+
+  const importSprites = async (importedSprites: Sprite[]): Promise<void> => {
+    // Validate and prepare sprites
+    const validSprites = importedSprites.map(sprite => {
+      // Ensure required properties exist
+      if (!sprite.id) {
+        sprite.id = `sprite_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      }
+      if (!sprite.name) {
+        sprite.name = `Sprite ${sprite.id}`;
+      }
+      if (!sprite.x) sprite.x = 200;
+      if (!sprite.y) sprite.y = 200;
+      if (!sprite.color) sprite.color = '#ff6b6b';
+      return sprite;
+    });
+
+    setSprites(validSprites);
+    setInitialSprites(validSprites.map(sprite => ({ ...sprite })));
+    setSelectedSprite(null);
+  };
+
   return (
     <SpriteContext.Provider value={{
       sprites,
@@ -69,7 +100,9 @@ export const SpriteProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       removeSprite,
       updateSprite,
       selectSprite,
-      resetSpritesToInitial
+      resetSpritesToInitial,
+      clearSprites,
+      importSprites
     }}>
       {children}
     </SpriteContext.Provider>
