@@ -1,4 +1,4 @@
-import { BlockInstance } from '../types/blocks';
+import { BlockInstance, FlowConnection } from '../types/blocks';
 
 // Block dimensions - must match BlockWorkspace constants
 const BASE_BLOCK_HEIGHT = 36;
@@ -11,148 +11,352 @@ const getBlockHeight = (block: BlockInstance) => {
   return BASE_BLOCK_HEIGHT + (hasInputs ? INPUT_HEIGHT_ADDITION : 0);
 };
 
-// Helper function to find connected blocks using pixel-perfect detection
-const findConnectedBlocks = (startBlock: BlockInstance, allBlocks: BlockInstance[]): BlockInstance[] => {
-  if (!startBlock.position) return [startBlock];
-  
-  const connected = [startBlock];
-  const visited = new Set([startBlock.instanceId]);
-  
-  const findBlocksBelow = (block: BlockInstance): void => {
-    if (!block.position) return;
-    
-    const blockHeight = getBlockHeight(block);
-    const expectedY = block.position.y + blockHeight + BLOCK_GAP;
-    
-    allBlocks.forEach(otherBlock => {
-      if (visited.has(otherBlock.instanceId) || !otherBlock.position || !block.position) return;
-      
-      // Pixel-perfect connection detection
-      const isDirectlyBelow = otherBlock.position.x === block.position.x && // Must be exactly aligned
-                             otherBlock.position.y === expectedY; // Must be exactly touching
-      
-      if (isDirectlyBelow) {
-        connected.push(otherBlock);
-        visited.add(otherBlock.instanceId);
-        findBlocksBelow(otherBlock); // Recursively find more connected blocks
-      }
-    });
-  };
-  
-  // First, find blocks that are indented (snapped to the right) if this is an event block
-  if (startBlock.type === 'event') {
-    allBlocks.forEach(otherBlock => {
-      if (visited.has(otherBlock.instanceId) || !otherBlock.position || !startBlock.position) return;
-      
-      // Check for indented blocks (exactly 15px to the right and same Y level)
-      const isIndented = otherBlock.position.x === (startBlock.position.x + 15) && // Exactly 15px indent
-                        otherBlock.position.y === startBlock.position.y; // Exact same Y level
-      
-      if (isIndented) {
-        connected.push(otherBlock);
-        visited.add(otherBlock.instanceId);
-        // Now find any blocks connected below this indented block
-        findBlocksBelow(otherBlock);
-      }
-    });
-  }
-  
-  // Also find blocks directly below the start block
-  findBlocksBelow(startBlock);
-  return connected;
+
+
+// Helper to check if a block is a drawing block
+const isDrawingBlock = (blockId: string): boolean => {
+  const drawingBlocks = [
+    'draw_circle', 'set_fill', 'set_background', 'draw_rect', 
+    'draw_circle_at', 'draw_sprite_circle', 'draw_trail'
+  ];
+  return drawingBlocks.includes(blockId);
 };
 
-// Helper function to apply context-aware sprite reference replacement
-const applySpriteContextReplacement = (block: BlockInstance, code: string, spriteIndexMap: Map<string, number>): string => {
-  if (block.workspaceType === 'stage') {
-    // Stage blocks should work with global canvas functions
-    // Only filter out sprite-specific blocks
-    const spriteSpecificBlocks = ['move_sprite', 'set_sprite_position', 'move_to_mouse', 'change_sprite_color', 'change_sprite_size', 'draw_sprite_circle', 'wait_frames'];
-    
-    if (spriteSpecificBlocks.includes(block.id)) {
-      console.log(`Ignoring sprite-specific block "${block.id}" in stage workspace`);
-      return '// Sprite-specific block ignored in stage workspace';
-    } else if (code.includes('sprites[0]')) {
-      // Replace any remaining sprite references with comments
-      console.log(`Removing sprite references from "${block.id}" in stage workspace`);
-      return code.replace(/sprites\[0\][^;]*;/g, '// Sprite reference removed for stage workspace;');
-    }
-    // Stage-appropriate blocks (background, circle, rect, fill, etc.) pass through unchanged
-    return code;
-  } else if (block.workspaceType === 'sprite' && block.spriteId) {
-    // Sprite blocks should affect their specific sprite
-    const spriteIndex = spriteIndexMap.get(block.spriteId);
-    if (spriteIndex !== undefined) {
-      // Replace sprites[0] with the correct sprite index
-      const oldCode = code;
-      const newCode = code.replace(/sprites\[0\]/g, `sprites[${spriteIndex}]`);
-      if (oldCode !== newCode) {
-        console.log(`🔄 Sprite index replacement for "${block.id}" on sprite ${block.spriteId}:`);
-        console.log(`   Before: ${oldCode}`);
-        console.log(`   After:  ${newCode}`);
-        console.log(`   Sprite index: ${spriteIndex}`);
-      }
-      return newCode;
-    } else {
-      console.log(`Sprite ${block.spriteId} not found, ignoring block`);
-      return '// Sprite not found, block ignored';
-    }
-  }
+// Helper to convert drawing code to use buffer
+const convertToBufferedDrawing = (code: string): string => {
+  // Convert direct drawing calls to buffered calls
+  code = code.replace(/fill\(([^)]+)\);/g, 'addDrawCommand("fill", $1);');
+  code = code.replace(/background\(([^)]+)\);/g, 'addDrawCommand("background", $1);');
+  code = code.replace(/rect\(([^)]+)\);/g, 'addDrawCommand("rect", $1);');
+  code = code.replace(/circle\(([^)]+)\);/g, 'addDrawCommand("circle", $1);');
+  code = code.replace(/ellipse\(([^)]+)\);/g, 'addDrawCommand("ellipse", $1);');
+  code = code.replace(/stroke\(([^)]+)\);/g, 'addDrawCommand("stroke", $1);');
+  code = code.replace(/strokeWeight\(([^)]+)\);/g, 'addDrawCommand("strokeWeight", $1);');
+  code = code.replace(/noStroke\(\);/g, 'addDrawCommand("noStroke");');
   
   return code;
 };
 
-export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] = []): string => {
-  let spriteCode = new Map<string, string>();
-  let eventCode = '';
-  let drawEventCode = ''; // For "when draw" events on stage
-  let spriteDrawEventCode = new Map<string, string>(); // For "when draw" events on sprites
-  let setupEventCode = ''; // For "when setup" events on stage
-  let spriteSetupEventCode = new Map<string, string>(); // For "when setup" events on sprites
-  
-  // Sort blocks by position for proper execution order
-  const sortedBlocks = [...blocks].sort((a, b) => {
-    if (!a.position || !b.position) return 0;
-    if (Math.abs(a.position.y - b.position.y) < 10) {
-      return a.position.x - b.position.x;
+// Simple sprite helper for direct p5play access
+const applySpriteContextReplacement = (block: BlockInstance, code: string, spriteIndexMap: Map<string, number>): string => {
+  if (block.workspaceType === 'stage') {
+    // Stage blocks work with global canvas functions
+    const spriteSpecificBlocks = ['move_sprite', 'set_sprite_position', 'move_to_mouse', 'change_sprite_color', 'change_sprite_size'];
+    
+    if (spriteSpecificBlocks.includes(block.id)) {
+      return '// Sprite-specific block ignored in stage workspace';
+    } else if (code.includes('sprites[0]')) {
+      return code.replace(/sprites\[0\][^;]*;/g, '// Sprite reference removed for stage workspace;');
     }
-    return a.position.y - b.position.y;
-  });
+    return code;
+  } else if (block.workspaceType === 'sprite' && block.spriteId) {
+    const spriteIndex = spriteIndexMap.get(block.spriteId);
+    if (spriteIndex !== undefined) {
+      // Fix moveTo calls to use p5play sprite directly
+      let newCode = code.replace(/sprites\[0\]/g, `sprites[${spriteIndex}]`);
+      newCode = newCode.replace(/sprites\[(\d+)\]\.moveTo\(([^)]+)\)/g, 'sprites[$1].p5playSprite.moveTo($2)');
+      
+      // Fix any remaining old mouse coordinate references
+      newCode = newCode.replace(/\bmouseX\b/g, '(window.globalMouseX || 0)');
+      newCode = newCode.replace(/\bmouseY\b/g, '(window.globalMouseY || 0)');
+      
+      return newCode;
+    } else {
+      return '// Sprite not found, block ignored';
+    }
+  }
   
-  // Keep track of blocks that are children of events
-  const eventChildBlocks = new Set<string>();
+  // For all blocks, fix old mouse coordinate references
+  let fixedCode = code.replace(/\bmouseX\b/g, '(window.globalMouseX || 0)');
+  fixedCode = fixedCode.replace(/\bmouseY\b/g, '(window.globalMouseY || 0)');
   
-  // Create sprite lookup maps for efficiency
+  // Convert drawing blocks to use buffer system for async contexts
+  if (block.workspaceType === 'sprite' && isDrawingBlock(block.id)) {
+    fixedCode = convertToBufferedDrawing(fixedCode);
+  }
+  
+  return fixedCode;
+};
+
+// Async flowchart-based code generation with edge timing
+export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] = [], connections: FlowConnection[] = []): string => {
+  let setupEventCode = '';
+  let drawEventCode = '';
+  let asyncFunctions = '';
+  let eventFunctions = '';
+  let asyncStartupCode = '';
+  
+  // Create sprite lookup maps
   const spriteIndexMap = new Map<string, number>();
   sprites.forEach((sprite, index) => {
     spriteIndexMap.set(sprite.id, index);
   });
   
-  // Debug: Log sprite index mapping
-  console.log('🗺️ Sprite Index Map:');
-  spriteIndexMap.forEach((index, spriteId) => {
-    console.log(`   ${spriteId} → index ${index}`);
-  });
+  // Group blocks by workspace and event type
+  const eventBlocks = blocks.filter(block => block.type === 'event');
   
-  // First pass: identify all event blocks and their children
-  sortedBlocks.forEach(block => {
-    if (block.type === 'event') {
-      // Find child blocks using pixel-perfect connection detection
-      const connectedBlocks = findConnectedBlocks(block, sortedBlocks);
-      const childBlocks = connectedBlocks.filter(b => b.instanceId !== block.instanceId);
-      
-      // Mark these blocks as event children
-      childBlocks.forEach(childBlock => {
-        eventChildBlocks.add(childBlock.instanceId);
+  // Process each event block
+  eventBlocks.forEach(eventBlock => {
+    if (eventBlock.id === 'when_draw') {
+      if (eventBlock.workspaceType === 'stage') {
+        // Stage events still go in draw loop (background, stage effects, etc.)
+        const flowchainCode = generateFlowchainCode(eventBlock, blocks, connections, spriteIndexMap);
+        drawEventCode += flowchainCode;
+      } else if (eventBlock.workspaceType === 'sprite' && eventBlock.spriteId) {
+        // Sprite events become async functions that loop forever
+        const asyncFunction = generateAsyncSpriteFunction(eventBlock, blocks, connections, spriteIndexMap);
+        asyncFunctions += asyncFunction + '\n\n';
+        
+        // Add startup code to launch the async function
+        const spriteIndex = spriteIndexMap.get(eventBlock.spriteId);
+        asyncStartupCode += `  // Start async flowchart for ${eventBlock.spriteId}\n`;
+        asyncStartupCode += `  startSpriteFlowchart_${eventBlock.instanceId}();\n\n`;
+      }
+    } else if (eventBlock.id === 'when_setup') {
+      const flowchainCode = generateFlowchainCode(eventBlock, blocks, connections, spriteIndexMap);
+      setupEventCode += flowchainCode;
+    } else {
+      // Other events (click, key press, etc.)
+      const eventFunction = generateEventFunction(eventBlock, blocks, connections, spriteIndexMap);
+      eventFunctions += eventFunction + '\n\n';
+    }
+  });
+
+  // Generate sprite system
+  let spriteVariables = '';
+  let spriteSetup = '';
+  let utilityFunctions = '';
+
+  if (sprites.length > 0) {
+    spriteVariables = generateSpriteVariables(sprites);
+    spriteSetup = generateSpriteSetup(sprites);
+    utilityFunctions = generateUtilityFunctions();
+  }
+
+  return `${spriteVariables}${utilityFunctions}function setup() {
+  createCanvas(480, 360);
+${spriteSetup}${setupEventCode}
+${asyncStartupCode}}
+
+function draw() {
+  background(255);
+  
+  // Increment global frame counter
+  globalFrameCount++;
+  
+${drawEventCode}
+  // Execute buffered drawing commands from async flowcharts
+  executeDrawBuffer();
+  
+  // p5play automatically handles sprite rendering and physics
+}
+
+${asyncFunctions}${eventFunctions}`.trim();
+};
+
+// Generate flowchain execution code from event block (simplified for sync events)
+function generateFlowchainCode(
+  eventBlock: BlockInstance, 
+  allBlocks: BlockInstance[], 
+  connections: FlowConnection[], 
+  spriteIndexMap: Map<string, number>
+): string {
+  // Find all blocks connected to this event
+  const connectedBlocks = findConnectedBlocks(eventBlock.instanceId, allBlocks, connections);
+  
+  if (connectedBlocks.length === 0) {
+    return '';
+  }
+
+  // For sync events (setup, stage draw), just execute immediate chains
+  let code = '';
+  
+  // Execute only immediate connections (waitFrames === 0)
+  const immediateConnections = connections.filter(c => 
+    c.sourceBlockId === eventBlock.instanceId && c.waitFrames === 0
+  );
+  
+  immediateConnections.forEach(conn => {
+    const targetBlock = allBlocks.find(b => b.instanceId === conn.targetBlockId);
+    if (targetBlock) {
+      code += '  ' + processBlockCode(targetBlock, spriteIndexMap, allBlocks, connections, new Set()) + '\n';
+      // Continue following the immediate chain
+      code += generateChainCode(targetBlock, allBlocks, connections, spriteIndexMap, '  ');
+    }
+  });
+
+  return code;
+}
+
+
+
+// Find all blocks connected from a starting block
+function findConnectedBlocks(
+  startBlockId: string, 
+  allBlocks: BlockInstance[], 
+  connections: FlowConnection[]
+): BlockInstance[] {
+  const visited = new Set<string>();
+  const connected: BlockInstance[] = [];
+  
+  function traverse(blockId: string) {
+    if (visited.has(blockId)) return;
+    visited.add(blockId);
+    
+    const block = allBlocks.find(b => b.instanceId === blockId);
+    if (block) {
+      connected.push(block);
+    }
+    
+    // Find outgoing connections
+    const outgoing = connections.filter(c => c.sourceBlockId === blockId);
+    outgoing.forEach(conn => traverse(conn.targetBlockId));
+  }
+  
+  // Start from connections leaving the start block
+  const startConnections = connections.filter(c => c.sourceBlockId === startBlockId);
+  startConnections.forEach(conn => traverse(conn.targetBlockId));
+  
+  return connected;
+}
+
+// Find blocks that should be execution states (not embedded in control flow)
+function findExecutionStateBlocks(
+  startBlockId: string, 
+  allBlocks: BlockInstance[], 
+  connections: FlowConnection[]
+): BlockInstance[] {
+  const visited = new Set<string>();
+  const executionStates: BlockInstance[] = [];
+  
+  function traverse(blockId: string) {
+    if (visited.has(blockId)) return;
+    visited.add(blockId);
+    
+    const block = allBlocks.find(b => b.instanceId === blockId);
+    if (!block) return;
+    
+    // Check if this is a control flow block
+    const isControlFlow = block.labeledConnections && block.labeledConnections.outputs && 
+                         block.labeledConnections.outputs.some(output => output.type === 'flow');
+    
+    if (isControlFlow) {
+      // This is a control flow block - include it as an execution state
+      executionStates.push(block);
+      // Don't traverse into its flow outputs (they'll be handled inline)
+      // But do traverse non-flow outputs if any
+      const outgoing = connections.filter(c => c.sourceBlockId === blockId);
+      outgoing.forEach(conn => {
+        // Only traverse if it's not a flow connection
+        if (!conn.sourceHandle || !conn.sourceHandle.startsWith('output-')) {
+          traverse(conn.targetBlockId);
+        }
       });
+    } else {
+      // Regular block - include it as an execution state
+      executionStates.push(block);
+      // Continue traversing
+      const outgoing = connections.filter(c => c.sourceBlockId === blockId);
+      outgoing.forEach(conn => traverse(conn.targetBlockId));
+    }
+  }
+  
+  // Start from connections leaving the start block
+  const startConnections = connections.filter(c => c.sourceBlockId === startBlockId);
+  startConnections.forEach(conn => traverse(conn.targetBlockId));
+  
+  return executionStates;
+}
+
+
+
+// Generate code for a chain of blocks (for simple linear execution)
+function generateChainCode(
+  currentBlock: BlockInstance,
+  allBlocks: BlockInstance[],
+  connections: FlowConnection[],
+  spriteIndexMap: Map<string, number>,
+  indent: string
+): string {
+  let code = '';
+  
+  const outgoingConnections = connections.filter(c => c.sourceBlockId === currentBlock.instanceId);
+  
+  outgoingConnections.forEach(conn => {
+    const nextBlock = allBlocks.find(b => b.instanceId === conn.targetBlockId);
+    if (!nextBlock) return;
+    
+    if (conn.waitFrames === 0) {
+      // Immediate execution
+      let blockCode = processBlockCode(nextBlock, spriteIndexMap, allBlocks, connections, new Set());
       
-      console.log(`🎯 Event "${block.id}" has ${childBlocks.length} pixel-perfect connected children:`, 
-                  childBlocks.map(b => b.id));
+      // Apply drawing buffer transformation for sprite contexts
+      if (nextBlock.workspaceType === 'sprite') {
+        blockCode = convertToBufferedDrawing(blockCode);
+      }
+      
+      code += indent + blockCode + '\n';
+      code += generateChainCode(nextBlock, allBlocks, connections, spriteIndexMap, indent);
+    } else {
+      // Wait required - end chain here (will be handled by flowchart execution)
+      return;
     }
   });
   
-  // Process each block
-  sortedBlocks.forEach(block => {
+  return code;
+}
+
+// Helper function to get safe placeholder values for incomplete connections
+function getSafePlaceholder(type: 'boolean' | 'number' | 'flow' | string, label: string): string {
+  switch (type) {
+    case 'boolean':
+      return 'true'; // Safe default for boolean operations
+    case 'number':
+      return '0'; // Safe default for math operations
+    case 'flow':
+      return `/* ${label} not connected */`; // Safe comment for flow operations
+    default:
+      return `/* ${label} */`; // Generic safe comment
+  }
+}
+
+// Process individual block code with input substitution and labeled connections
+function processBlockCode(
+  block: BlockInstance, 
+  spriteIndexMap: Map<string, number>,
+  allBlocks?: BlockInstance[],
+  connections?: FlowConnection[],
+  processingStack?: Set<string>
+): string {
+    // Prevent infinite recursion by tracking which blocks are currently being processed
+    if (!processingStack) {
+      processingStack = new Set<string>();
+    }
+    
+    if (processingStack.has(block.instanceId)) {
+      // Circular reference detected - return simple code without recursion
+      console.warn(`Circular reference detected for block ${block.instanceId}, using simple code`);
+      let code = block.code;
+      
+      // Only handle basic input substitution without recursive labeled connections
+      if (block.inputs && block.values) {
+        block.inputs.forEach(input => {
+          const value = block.values![input.name] ?? input.defaultValue;
+          const placeholder = `\${${input.name}}`;
+          
+          if (input.type === 'text') {
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+          } else {
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
+          }
+        });
+      }
+      
+      return applySpriteContextReplacement(block, code, spriteIndexMap);
+    }
+    
+    // Add this block to the processing stack
+    processingStack.add(block.instanceId);
     let code = block.code;
     
     // Replace input placeholders with actual values
@@ -169,430 +373,395 @@ export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] =
       });
     }
     
-    // Context-aware sprite reference replacement
-    code = applySpriteContextReplacement(block, code, spriteIndexMap);
-    
-    if (block.type === 'event') {
-      // Find child blocks using pixel-perfect connection detection
-      const connectedBlocks = findConnectedBlocks(block, sortedBlocks);
-      const childBlocks = connectedBlocks.filter(b => b.instanceId !== block.instanceId);
-      
-      if (childBlocks.length === 0) {
-        // No child blocks, just process the event
-        if (block.id === 'when_draw') {
-          // Empty draw event
-        } else if (block.id === 'when_setup') {
-          // Empty setup event
-        } else {
-          code = code.replace('${content}', '');
-          eventCode += code + '\n\n';
-        }
-        return;
-      }
-      
-      // Generate frame-based sequencing for chained blocks
-      let childCode = '';
-      
-      if (childBlocks.length === 1) {
-        // Single block - no sequencing needed
-        const childBlock = childBlocks[0];
-        let childCodeStr = childBlock.code;
-        
-        // Process child block inputs and context
-        if (childBlock.inputs && childBlock.values) {
-          childBlock.inputs.forEach(input => {
-            const value = childBlock.values![input.name] ?? input.defaultValue;
-            const placeholder = `\${${input.name}}`;
-            
-            if (input.type === 'text') {
-              childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-            } else {
-              childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
-            }
-          });
-        }
-        
-        // Apply context-aware sprite reference replacement
-        childCodeStr = applySpriteContextReplacement(childBlock, childCodeStr, spriteIndexMap);
-        
-        childCode = '  ' + childCodeStr + '\n';
-      } else {
-        // Multiple blocks - use Action Queue State Machine
-        console.log(`🎬 Generating action queue for ${childBlocks.length} chained blocks:`, 
-                    childBlocks.map(b => b.id));
-        
-        if (block.workspaceType === 'sprite' && block.spriteId) {
-          const spriteIndex = spriteIndexMap.get(block.spriteId);
-          if (spriteIndex !== undefined) {
-            // Build action queue with explicit actions
-            const actions = childBlocks.map((childBlock, index) => {
-              let childCodeStr = childBlock.code;
-              
-              // Process child block inputs and context
-              if (childBlock.inputs && childBlock.values) {
-                childBlock.inputs.forEach(input => {
-                  const value = childBlock.values![input.name] ?? input.defaultValue;
-                  const placeholder = `\${${input.name}}`;
-                  
-                  if (input.type === 'text') {
-                    childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-                  } else {
-                    childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
-                  }
-                });
-              }
-              
-              // Apply context-aware sprite reference replacement
-              childCodeStr = applySpriteContextReplacement(childBlock, childCodeStr, spriteIndexMap);
-              
-              return {
-                id: childBlock.id,
-                code: childCodeStr,
-                index: index
-              };
-            });
-            
-            childCode += `  // Action Queue State Machine for ${childBlocks.length} actions\n`;
-            childCode += `  const sprite = sprites[${spriteIndex}];\n`;
-            childCode += `  \n`;
-            childCode += `  // Create hash of action content to detect changes\n`;
-            childCode += `  const actionHash = '${JSON.stringify(actions).replace(/'/g, "\\'")}'; \n`;
-            childCode += `  \n`;
-            childCode += `  // Initialize action queue if needed (checks both length AND content)\n`;
-            childCode += `  if (!sprite.actionQueue || sprite.actionQueue.length !== ${childBlocks.length} || JSON.stringify(sprite.actionQueue) !== actionHash) {\n`;
-            childCode += `    sprite.actionQueue = ${JSON.stringify(actions)};\n`;
-            childCode += `    sprite.currentActionIndex = 0;\n`;
-            childCode += `    sprite.actionState = 'ready';\n`;
-            childCode += `    sprite.waitUntilFrame = 0; // Clear any existing wait state when refreshing action queue\n`;
-            childCode += `    if (typeof addDebugLog === 'function') {\n`;
-            childCode += `      addDebugLog(globalFrameCount, '🔄 Initialized action queue with ${childBlocks.length} actions:', 'info');\n`;
-            childCode += `      sprite.actionQueue.forEach((action, i) => {\n`;
-            childCode += `        addDebugLog(globalFrameCount, '  Action ' + i + ': ' + action.id + ' | Code: ' + action.code, 'info');\n`;
-            childCode += `      });\n`;
-            childCode += `    }\n`;
-            childCode += `  }\n`;
-            childCode += `  \n`;
-            childCode += `  // Robust action execution: Always try to execute actions first\n`;
-            childCode += `  // Only skip execution if we're in a wait state from a PREVIOUS action\n`;
-            childCode += `  \n`;
-            childCode += `  // Check if sprite is currently waiting from a previous action\n`;
-            childCode += `  let isCurrentlyWaiting = sprite.waitUntilFrame > 0 && globalFrameCount < sprite.waitUntilFrame;\n`;
-            childCode += `  \n`;
-            childCode += `  // Debug: Log current state at start of frame\n`;
-            childCode += `  if (typeof addDebugLog === 'function' && globalFrameCount % 30 === 0) {\n`;
-            childCode += `    addDebugLog(globalFrameCount, '🔍 Frame state: actionIndex=' + sprite.currentActionIndex + ', waitUntilFrame=' + sprite.waitUntilFrame + ', isWaiting=' + isCurrentlyWaiting, 'info');\n`;
-            childCode += `  }\n`;
-            childCode += `  \n`;
-            childCode += `  // If wait period is complete, advance to next action and clear wait\n`;
-            childCode += `  if (sprite.waitUntilFrame > 0 && globalFrameCount >= sprite.waitUntilFrame) {\n`;
-            childCode += `    if (typeof addDebugLog === 'function') {\n`;
-            childCode += `      addDebugLog(globalFrameCount, '🔍 Wait completion detected: currentActionIndex=' + sprite.currentActionIndex + ', waitUntilFrame=' + sprite.waitUntilFrame, 'wait');\n`;
-            childCode += `    }\n`;
-            childCode += `    \n`;
-            childCode += `    sprite.waitUntilFrame = 0;\n`;
-            childCode += `    sprite.currentActionIndex++;\n`;
-            childCode += `    \n`;
-            childCode += `    if (typeof addDebugLog === 'function') {\n`;
-            childCode += `      addDebugLog(globalFrameCount, '⏰ Wait completed! Advanced to action ' + sprite.currentActionIndex, 'wait');\n`;
-            childCode += `    }\n`;
-            childCode += `    \n`;
-            childCode += `    // Check if we've completed all actions after advancing\n`;
-            childCode += `    if (sprite.currentActionIndex >= sprite.actionQueue.length) {\n`;
-            childCode += `      sprite.currentActionIndex = 0; // Loop back to start\n`;
-            childCode += `      if (typeof addDebugLog === 'function') {\n`;
-            childCode += `        addDebugLog(globalFrameCount, '🔄 Queue completed after wait, wrapped to action 0', 'info');\n`;
-            childCode += `      }\n`;
-            childCode += `    }\n`;
-            childCode += `    \n`;
-            childCode += `    if (typeof addDebugLog === 'function') {\n`;
-            childCode += `      addDebugLog(globalFrameCount, '✅ Final action index after wait completion: ' + sprite.currentActionIndex, 'wait');\n`;
-            childCode += `    }\n`;
-            childCode += `    \n`;
-            childCode += `    // Now that wait is complete and we've advanced, we can execute the new action\n`;
-            childCode += `    isCurrentlyWaiting = false;\n`;
-            childCode += `  }\n`;
-            childCode += `  \n`;
-            childCode += `  // Execute current action if ready (unless we're waiting from a previous action)\n`;
-            childCode += `  if (!isCurrentlyWaiting && sprite.actionState === 'ready' && sprite.currentActionIndex < sprite.actionQueue.length) {\n`;
-            childCode += `    const currentAction = sprite.actionQueue[sprite.currentActionIndex];\n`;
-            childCode += `    \n`;
-            childCode += `    // Debug: Log what we're about to execute\n`;
-            childCode += `    if (typeof addDebugLog === 'function') {\n`;
-            childCode += `      addDebugLog(globalFrameCount, '🔍 About to execute: actionIndex=' + sprite.currentActionIndex + ', actionId=' + currentAction.id, 'action');\n`;
-            childCode += `      addDebugLog(globalFrameCount, '🎬 Executing Action ' + sprite.currentActionIndex + ': ' + currentAction.id, 'action');\n`;
-            childCode += `      addDebugLog(globalFrameCount, '📝 Code: ' + currentAction.code, 'info');\n`;
-            childCode += `    }\n`;
-            childCode += `    \n`;
-            childCode += `    // Store previous waitUntilFrame to detect if action sets a wait\n`;
-            childCode += `    const previousWaitUntilFrame = sprite.waitUntilFrame;\n`;
-            childCode += `    \n`;
-            childCode += `    // EXECUTE THE ACTION FIRST - this is the robust approach\n`;
-            childCode += `    eval(currentAction.code);\n`;
-            childCode += `    \n`;
-            childCode += `    // After execution, check if this action set a wait state\n`;
-            childCode += `    if (sprite.waitUntilFrame > previousWaitUntilFrame) {\n`;
-            childCode += `      // Action set a wait state - log it\n`;
-            childCode += `      if (typeof addDebugLog === 'function') {\n`;
-            childCode += `        addDebugLog(globalFrameCount, '⏳ Wait set until frame ' + sprite.waitUntilFrame + ' (pausing queue)', 'wait');\n`;
-            childCode += `      }\n`;
-            childCode += `      // DON'T advance to next action - let the wait complete first\n`;
-            childCode += `      // The action has executed, now we wait before the next one\n`;
-            childCode += `    } else {\n`;
-            childCode += `      // Normal action completed without setting wait, move to next action immediately\n`;
-            childCode += `      sprite.currentActionIndex++;\n`;
-            childCode += `      if (typeof addDebugLog === 'function') {\n`;
-            childCode += `        addDebugLog(globalFrameCount, '✅ Action completed, advancing to action ' + sprite.currentActionIndex, 'info');\n`;
-            childCode += `      }\n`;
-            childCode += `      \n`;
-            childCode += `      // Check if we've completed all actions\n`;
-            childCode += `      if (sprite.currentActionIndex >= sprite.actionQueue.length) {\n`;
-            childCode += `        sprite.currentActionIndex = 0; // Loop back to start\n`;
-            childCode += `        if (typeof addDebugLog === 'function') {\n`;
-            childCode += `          addDebugLog(globalFrameCount, '🔄 Queue completed, restarting from action 0', 'info');\n`;
-            childCode += `        }\n`;
-            childCode += `      }\n`;
-            childCode += `    }\n`;
-            childCode += `  } else if (isCurrentlyWaiting) {\n`;
-            childCode += `    // Log waiting status (only every 30 frames to avoid spam)\n`;
-            childCode += `    if (globalFrameCount % 30 === 0 && typeof addDebugLog === 'function') {\n`;
-            childCode += `      const framesLeft = sprite.waitUntilFrame - globalFrameCount;\n`;
-            childCode += `      addDebugLog(globalFrameCount, '💤 WAITING: ' + framesLeft + ' frames left (until frame ' + sprite.waitUntilFrame + ')', 'wait');\n`;
-            childCode += `    }\n`;
-            childCode += `  } else {\n`;
-            childCode += `    // Debug: Log when no action executes\n`;
-            childCode += `    if (typeof addDebugLog === 'function' && globalFrameCount % 30 === 0) {\n`;
-            childCode += `      addDebugLog(globalFrameCount, '🔍 No action executing: isWaiting=' + isCurrentlyWaiting + ', actionState=' + sprite.actionState + ', actionIndex=' + sprite.currentActionIndex + '/' + sprite.actionQueue.length, 'info');\n`;
-            childCode += `    }\n`;
-            childCode += `  }\n`;
-            childCode += `  \n`;
-          } else {
-            // Fallback for stage or unknown sprite - use simple iteration
-            childCode += `  // Stage action sequence for ${childBlocks.length} blocks\n`;
-            childCode += `  const actionIndex = globalFrameCount % ${childBlocks.length};\n`;
-            childCode += `  \n`;
-            
-            childBlocks.forEach((childBlock, index) => {
-              let childCodeStr = childBlock.code;
-              
-              // Process child block inputs and context
-              if (childBlock.inputs && childBlock.values) {
-                childBlock.inputs.forEach(input => {
-                  const value = childBlock.values![input.name] ?? input.defaultValue;
-                  const placeholder = `\${${input.name}}`;
-                  
-                  if (input.type === 'text') {
-                    childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-                  } else {
-                    childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
-                  }
-                });
-              }
-              
-              // Apply context-aware sprite reference replacement
-              childCodeStr = applySpriteContextReplacement(childBlock, childCodeStr, spriteIndexMap);
-              
-              if (index === 0) {
-                childCode += `  if (actionIndex === ${index}) {\n`;
-              } else {
-                childCode += `  } else if (actionIndex === ${index}) {\n`;
-              }
-              childCode += `    // Execute: ${childBlock.id}\n`;
-              childCode += `    ${childCodeStr}\n`;
-            });
-            
-            childCode += `  }\n`;
-          }
-        } else {
-          // Stage blocks use simple iteration
-          childCode += `  // Stage action sequence for ${childBlocks.length} blocks\n`;
-          childCode += `  const actionIndex = globalFrameCount % ${childBlocks.length};\n`;
-          childCode += `  \n`;
+    // Handle labeled connections if we have the necessary data
+    if (block.labeledConnections && allBlocks && connections) {
+      // Handle labeled input connections (like condition inputs)
+      if (block.labeledConnections.inputs) {
+        block.labeledConnections.inputs.forEach((input, index) => {
+          const placeholder = `\${${input.label}}`;
+          const handleId = `input-${index}`;
           
-          childBlocks.forEach((childBlock, index) => {
-            let childCodeStr = childBlock.code;
+          try {
+            // Find connection coming into this input
+            const incomingConnection = connections.find(conn => 
+              conn.targetBlockId === block.instanceId && 
+              conn.targetHandle === handleId
+            );
             
-            // Process child block inputs and context
-            if (childBlock.inputs && childBlock.values) {
-              childBlock.inputs.forEach(input => {
-                const value = childBlock.values![input.name] ?? input.defaultValue;
-                const placeholder = `\${${input.name}}`;
-                
-                if (input.type === 'text') {
-                  childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-                } else {
-                  childCodeStr = childCodeStr.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
+            if (incomingConnection) {
+              const sourceBlock = allBlocks.find(b => b.instanceId === incomingConnection.sourceBlockId);
+              if (sourceBlock && !processingStack.has(sourceBlock.instanceId)) {
+                const sourceCode = processBlockCode(sourceBlock, spriteIndexMap, allBlocks, connections, processingStack);
+                code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), sourceCode);
+              } else {
+                // Source block is being processed or doesn't exist, use safe placeholder
+                const safeValue = getSafePlaceholder(input.type, input.label);
+                code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
+              }
+            } else {
+              // No connection, use safe placeholder based on type
+              const safeValue = getSafePlaceholder(input.type, input.label);
+              code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
+            }
+          } catch (error) {
+            // Error in processing, use safe fallback
+            console.warn(`Error processing input ${input.label} for block ${block.instanceId}:`, error);
+            const safeValue = getSafePlaceholder(input.type, input.label);
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
+                  }
+                });
+              }
+              
+      // Handle labeled output connections (like do, then, else outputs)
+      if (block.labeledConnections.outputs) {
+        block.labeledConnections.outputs.forEach((output, index) => {
+          const placeholder = `\${${output.label}}`;
+          const handleId = `output-${index}`;
+          
+          try {
+            // Find connections going out from this output
+            const outgoingConnections = connections.filter(conn => 
+              conn.sourceBlockId === block.instanceId && 
+              conn.sourceHandle === handleId
+            );
+            
+            if (outgoingConnections.length > 0) {
+              let outputCode = '';
+              let hasValidConnections = false;
+              
+              outgoingConnections.forEach(conn => {
+                const targetBlock = allBlocks.find(b => b.instanceId === conn.targetBlockId);
+                if (targetBlock && !processingStack.has(targetBlock.instanceId)) {
+                  try {
+                    let targetCode = processBlockCode(targetBlock, spriteIndexMap, allBlocks, connections, processingStack);
+                    
+                    // Apply drawing buffer transformation for sprite contexts
+                    if (targetBlock.workspaceType === 'sprite') {
+                      targetCode = convertToBufferedDrawing(targetCode);
+                    }
+                    
+                    outputCode += targetCode + '\n    ';
+                    hasValidConnections = true;
+                    
+                    // Continue following the chain from this block (but safely)
+                    const chainCode = generateChainCode(targetBlock, allBlocks, connections, spriteIndexMap, '    ');
+                    outputCode += chainCode;
+                  } catch (error) {
+                    console.warn(`Error processing target block ${targetBlock.instanceId}:`, error);
+                  }
                 }
               });
-            }
-            
-            if (index === 0) {
-              childCode += `  if (actionIndex === ${index}) {\n`;
+              
+              if (hasValidConnections) {
+                // Remove trailing whitespace and newlines
+                outputCode = outputCode.trim();
+                code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), outputCode);
+              } else {
+                // No valid connections, use safe placeholder
+                const safeValue = getSafePlaceholder(output.type, output.label);
+                code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
+              }
             } else {
-              childCode += `  } else if (actionIndex === ${index}) {\n`;
+              // No connections, use safe placeholder
+              const safeValue = getSafePlaceholder(output.type, output.label);
+              code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
             }
-            childCode += `    // Execute: ${childBlock.id}\n`;
-            childCode += `    ${childCodeStr}\n`;
-          });
-          
-          childCode += `  }\n`;
-        }
-        
-        childCode += `\n`;
+          } catch (error) {
+            // Error in processing, use safe fallback
+            console.warn(`Error processing output ${output.label} for block ${block.instanceId}:`, error);
+            const safeValue = getSafePlaceholder(output.type, output.label);
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
+          }
+        });
       }
-      
-      // Handle different event types
-      if (block.id === 'when_draw') {
-        // "when draw" events go directly into draw functions
-        if (block.workspaceType === 'stage') {
-          drawEventCode += childCode;
-        } else if (block.workspaceType === 'sprite' && block.spriteId) {
-          const existing = spriteDrawEventCode.get(block.spriteId) || '';
-          spriteDrawEventCode.set(block.spriteId, existing + childCode);
-        }
-      } else if (block.id === 'when_setup') {
-        // "when setup" events go into setup functions
-        if (block.workspaceType === 'stage') {
-          setupEventCode += childCode;
-        } else if (block.workspaceType === 'sprite' && block.spriteId) {
-          const existing = spriteSetupEventCode.get(block.spriteId) || '';
-          spriteSetupEventCode.set(block.spriteId, existing + childCode);
-        }
-      } else {
-        // Other events (like "when clicked") create their own functions
-      code = code.replace('${content}', childCode.trimEnd());
-      eventCode += code + '\n\n';
-      }
-    } else if (!eventChildBlocks.has(block.instanceId)) {
-      // Regular blocks that are NOT children of events - these are "naked" blocks
-      // We ignore them completely - they should not execute
-      console.log(`Ignoring naked block: ${block.id} (${block.instanceId})`);
     }
-    // Note: blocks that ARE children of events are handled above in the event processing
-  });
+    
+    // Remove this block from the processing stack before returning
+    processingStack.delete(block.instanceId);
+    
+    return applySpriteContextReplacement(block, code, spriteIndexMap);
+}
 
-  // Generate sprite variables and initialization
-  let spriteVariables = '';
-  let spriteSetup = '';
-  let spriteFunctions = '';
-  let spriteUpdateCalls = '';
+// Generate async sprite function that loops forever
+function generateAsyncSpriteFunction(
+  eventBlock: BlockInstance,
+  allBlocks: BlockInstance[],
+  connections: FlowConnection[],
+  spriteIndexMap: Map<string, number>
+): string {
+  const functionName = `startSpriteFlowchart_${eventBlock.instanceId}`;
+  const spriteIndex = spriteIndexMap.get(eventBlock.spriteId!);
   
-  if (sprites.length > 0) {
-    // Generate array-based sprite system instead of individual variables
-    spriteVariables = `// Modern sprite system using arrays and hashmaps
-let sprites = [
-${sprites.map((sprite, index) => `  {
+  let code = `// Async flowchart function for ${eventBlock.spriteId}\n`;
+  code += `async function ${functionName}() {\n`;
+  code += `  const spriteIndex = ${spriteIndex};\n`;
+  code += `  \n`;
+  code += `  while (true) {\n`;
+  code += `    try {\n`;
+  
+  // Generate the flowchart execution code
+  const flowchartCode = generateAsyncFlowchartCode(eventBlock, allBlocks, connections, spriteIndexMap);
+  code += flowchartCode;
+  
+  code += `    } catch (error) {\n`;
+  code += `      console.error('Sprite flowchart error:', error);\n`;
+  code += `      await waitFrames(60); // Wait 1 second before retrying\n`;
+  code += `    }\n`;
+  code += `  }\n`;
+  code += `}\n`;
+  
+  return code;
+}
+
+// Generate simple linear code execution
+function generateAsyncFlowchartCode(
+  eventBlock: BlockInstance,
+  allBlocks: BlockInstance[],
+  connections: FlowConnection[],
+  spriteIndexMap: Map<string, number>
+): string {
+  let code = `    // Execute blocks in sequence\n`;
+  
+  // Find the linear sequence starting from the event block
+  const sequence = buildLinearSequence(eventBlock, allBlocks, connections);
+  
+  for (const block of sequence) {
+    let blockCode = processBlockCode(block, spriteIndexMap, allBlocks, connections, new Set());
+    blockCode = convertToBufferedDrawing(blockCode);
+    code += `    ${blockCode}\n`;
+  }
+  
+  code += `    await waitFrames(1); // Small delay before next iteration\n`;
+  
+  return code;
+}
+
+// Build a linear sequence of blocks to execute
+function buildLinearSequence(
+  startBlock: BlockInstance,
+  allBlocks: BlockInstance[],
+  connections: FlowConnection[]
+): BlockInstance[] {
+  const sequence: BlockInstance[] = [];
+  const visited = new Set<string>();
+  
+  function addToSequence(block: BlockInstance) {
+    if (visited.has(block.instanceId)) return;
+    visited.add(block.instanceId);
+    
+    // Don't add the event block to the sequence
+    if (block.type !== 'event') {
+      sequence.push(block);
+    }
+    
+    // Find sequential flow connections (not control flow branches)
+    const sequentialConnections = connections.filter(c => 
+      c.sourceBlockId === block.instanceId && 
+      c.waitFrames === 0 &&
+      // Skip control flow branches (output-0, output-1) but include sequential flow (bottom, output)
+      (!c.sourceHandle?.startsWith('output-') || c.sourceHandle === 'output' || c.sourceHandle === 'bottom')
+    );
+    
+    // Follow the sequential connections
+    sequentialConnections.forEach(conn => {
+      const nextBlock = allBlocks.find(b => b.instanceId === conn.targetBlockId);
+      if (nextBlock) {
+        addToSequence(nextBlock);
+      }
+    });
+  }
+  
+  addToSequence(startBlock);
+  return sequence;
+}
+
+// Generate utility functions for frame waiting
+function generateUtilityFunctions(): string {
+  return `// Frame waiting utility for async functions
+function waitFrames(frames) {
+  return new Promise(resolve => {
+    const targetFrame = globalFrameCount + frames;
+    function checkFrame() {
+      if (globalFrameCount >= targetFrame) {
+        resolve();
+      } else {
+        requestAnimationFrame(checkFrame);
+      }
+    }
+    checkFrame();
+  });
+}
+
+`;
+}
+
+// Generate event function for click, key press, etc.
+function generateEventFunction(
+  eventBlock: BlockInstance,
+  allBlocks: BlockInstance[],
+  connections: FlowConnection[],
+  spriteIndexMap: Map<string, number>
+): string {
+  const functionName = `handle_${eventBlock.id}_${eventBlock.instanceId}`;
+  const flowchainCode = generateFlowchainCode(eventBlock, allBlocks, connections, spriteIndexMap);
+  
+  let code = `function ${functionName}() {\n`;
+  code += flowchainCode;
+  code += `}`;
+  
+  // Add event listener setup
+  if (eventBlock.id === 'when_clicked') {
+    code += `\n\n// Auto-setup click listener\nif (typeof mousePressed === 'undefined') {\n  function mousePressed() {\n    ${functionName}();\n  }\n}`;
+  }
+  
+  return code;
+}
+
+// Generate sprite variables
+function generateSpriteVariables(sprites: any[]): string {
+  let code = `// q5.js + p5play Flowchart Sprite System
+// Global frame counter for timing
+let globalFrameCount = 0;
+
+// Global mouse position for async functions
+let mouseX = 0;
+let mouseY = 0;
+
+// Drawing buffer for async-to-sync drawing coordination
+let drawingBuffer = [];
+
+// p5play sprites array - automatically managed by p5play
+let sprites = [`;
+
+  sprites.forEach((sprite, index) => {
+    code += `
+{
     id: "${sprite.id}",
     name: "${sprite.name}",
     x: ${sprite.x},
     y: ${sprite.y},
     size: ${sprite.size || 30},
+  w: ${sprite.size || 30},
+  h: ${sprite.size || 30},
     color: "${sprite.color || '#ff6b6b'}",
-    visible: ${sprite.visible !== false},
-    waitUntilFrame: ${sprite.waitUntilFrame || 0},
-    actionQueue: [],
-    currentActionIndex: 0,
-    actionState: 'ready'
-  }`).join(',\n')}
+  visible: ${sprite.visible !== false}
+}`;
+    
+    if (index < sprites.length - 1) {
+      code += ',';
+    }
+  });
+
+  code += `
 ];
 
-// Sprite lookup map for efficient access by ID
-const spriteMap = new Map();
-sprites.forEach((sprite, index) => {
-  spriteMap.set(sprite.id, index);
-});
-
-// Sprite access functions
+// Simple sprite helper functions
 function getSpriteById(id) {
-  const index = spriteMap.get(id);
-  return index !== undefined ? sprites[index] : null;
+  return sprites.find(sprite => sprite.id === id);
 }
 
 function updateSprite(id, updates) {
-  const index = spriteMap.get(id);
-  if (index !== undefined) {
-    Object.assign(sprites[index], updates);
+  const sprite = getSpriteById(id);
+  if (sprite) {
+    Object.assign(sprite, updates);
+    // Sync with p5play sprite if it exists
+    if (sprite.p5playSprite) {
+      if (updates.x !== undefined) sprite.p5playSprite.x = updates.x;
+      if (updates.y !== undefined) sprite.p5playSprite.y = updates.y;
+      if (updates.size !== undefined) { 
+        sprite.p5playSprite.w = updates.size; 
+        sprite.p5playSprite.h = updates.size; 
+      }
+      if (updates.color !== undefined) sprite.p5playSprite.color = updates.color;
+      if (updates.visible !== undefined) sprite.p5playSprite.visible = updates.visible;
+      if (updates.opacity !== undefined) sprite.p5playSprite.opacity = updates.opacity;
+      if (updates.scale !== undefined) sprite.p5playSprite.scale = updates.scale;
+      if (updates.tint !== undefined) sprite.p5playSprite.tint = updates.tint;
+    }
   }
 }
 
+// Enhanced debug logging for q5.js + p5play
+function addDebugLog(frame, message, type) {
+  console.log(\`[q5+p5play] Frame \${frame}: \${message}\`);
+}
+
+// Drawing buffer management functions
+function addDrawCommand(command, ...args) {
+  drawingBuffer.push({ command, args });
+}
+
+function executeDrawBuffer() {
+  drawingBuffer.forEach(({ command, args }) => {
+    // Execute the command using the global drawing functions
+    try {
+      switch (command) {
+        case 'fill':
+          fill(...args);
+          break;
+        case 'background':
+          background(...args);
+          break;
+        case 'rect':
+          rect(...args);
+          break;
+        case 'circle':
+          circle(...args);
+          break;
+        case 'ellipse':
+          ellipse(...args);
+          break;
+        case 'stroke':
+          stroke(...args);
+          break;
+        case 'strokeWeight':
+          strokeWeight(...args);
+          break;
+        case 'noStroke':
+          noStroke();
+          break;
+        default:
+          console.warn(\`Unknown drawing command: \${command}\`);
+      }
+    } catch (error) {
+      console.warn(\`Failed to execute drawing command: \${command}\`, error);
+    }
+  });
+  drawingBuffer = []; // Clear buffer after execution
+}
 `;
+
+  return code;
+}
     
     // Generate sprite setup code
-    spriteSetup = '  // Initialize sprites\n';
-    sprites.forEach((sprite, index) => {
-      spriteSetup += `  // ${sprite.name} is at position (${sprite.x}, ${sprite.y})\n`;
-      
-      // Add sprite-specific setup event code
-      const spriteSetupCode = spriteSetupEventCode.get(sprite.id) || '';
-      if (spriteSetupCode.trim()) {
-        spriteSetup += `  // When setup event code for ${sprite.name}\n`;
-        spriteSetup += spriteSetupCode;
-      }
-    });
-    spriteSetup += '\n';
-    
-    // Generate sprite update functions
-    sprites.forEach((sprite, index) => {
-      const cleanId = sprite.id.replace(/[^a-zA-Z0-9]/g, '_');
-      const spriteBlockCode = spriteCode.get(sprite.id) || '';
-      
-      if (spriteBlockCode.trim()) {
-        spriteFunctions += `function updateSprite_${cleanId}() {\n`;
-        spriteFunctions += `  // Update ${sprite.name} (index ${index})\n`;
-        spriteFunctions += `  const sprite = sprites[${index}];\n`;
-        spriteFunctions += `  \n`;
-        spriteFunctions += `  // Only execute actions if sprite is not waiting (using global frame clock)\n`;
-        spriteFunctions += `  if (!sprite.waitUntilFrame || globalFrameCount >= sprite.waitUntilFrame) {\n`;
-        spriteFunctions += spriteBlockCode.split('\n').map(line => line ? '    ' + line : '').join('\n');
-        spriteFunctions += `  }\n`;
-        spriteFunctions += `}\n\n`;
-        
-        spriteUpdateCalls += `  updateSprite_${cleanId}();\n`;
-      }
-    });
-    
-    // Add sprite drawing code using array system
-    spriteFunctions += `function drawSprites() {\n`;
-    spriteFunctions += `  // Draw all sprites using array system\n`;
-    sprites.forEach((sprite, index) => {
-      const spriteDrawCode = spriteDrawEventCode.get(sprite.id) || '';
-      
-      spriteFunctions += `  // Draw ${sprite.name} (index ${index})\n`;
-      spriteFunctions += `  if (sprites[${index}].visible) {\n`;
-      if (spriteDrawCode.trim()) {
-        spriteFunctions += `    // When draw event code for ${sprite.name}\n`;
-        // Don't add sprite declaration if the draw code already has one (from frame-based sequencing)
-        if (!spriteDrawCode.includes('const sprite = sprites[')) {
-          spriteFunctions += `    const sprite = sprites[${index}];\n`;
-        }
-        spriteFunctions += spriteDrawCode.split('\n').map(line => line ? '    ' + line : '').join('\n');
-      }
-      spriteFunctions += `    fill(sprites[${index}].color);\n`;
-      spriteFunctions += `    stroke(255);\n`;
-      spriteFunctions += `    strokeWeight(2);\n`;
-      spriteFunctions += `    circle(sprites[${index}].x, sprites[${index}].y, sprites[${index}].size);\n`;
-      spriteFunctions += `    \n`;
-      spriteFunctions += `    // Add highlight/glare\n`;
-      spriteFunctions += `    fill(255, 255, 255, 120);\n`;
-      spriteFunctions += `    noStroke();\n`;
-      spriteFunctions += `    circle(sprites[${index}].x - sprites[${index}].size * 0.15, sprites[${index}].y - sprites[${index}].size * 0.15, sprites[${index}].size * 0.3);\n`;
-      spriteFunctions += `  }\n\n`;
-    });
-    spriteFunctions += `}\n\n`;
-    
-    spriteUpdateCalls += `  drawSprites();\n`;
-  }
+function generateSpriteSetup(sprites: any[]): string {
+  let code = '  // Initialize q5.js + p5play sprite system\n';
+  code += '  // Disable gravity by default (can be enabled via blocks)\n';
+  code += '  if (typeof world !== "undefined") world.gravity.y = 0;\n\n';
 
-  // The final code structure with complete sprite information
-  const finalCode = `${spriteVariables}function setup() {
-  createCanvas(480, 360);
-${spriteSetup}${setupEventCode}}
+    sprites.forEach((sprite, index) => {
+    code += `  // Initialize ${sprite.name} with p5play integration\n`;
+    code += `  sprites[${index}].p5playSprite = new Sprite();\n`;
+    code += `  sprites[${index}].p5playSprite.x = ${sprite.x};\n`;
+    code += `  sprites[${index}].p5playSprite.y = ${sprite.y};\n`;
+    code += `  sprites[${index}].p5playSprite.w = ${sprite.size || 30};\n`;
+    code += `  sprites[${index}].p5playSprite.h = ${sprite.size || 30};\n`;
+    code += `  sprites[${index}].p5playSprite.color = "${sprite.color || '#ff6b6b'}";\n`;
+    code += `  sprites[${index}].p5playSprite.visible = ${sprite.visible !== false};\n`;
+    code += `  sprites[${index}].p5playSprite.collider = 'none'; // Disable physics by default\n`;
+    code += `  sprites[${index}].p5playSprite.spriteId = "${sprite.id}";\n\n`;
+  });
 
-function draw() {
-  background(255);
-${drawEventCode}${spriteUpdateCalls}
+  code += '  // Sync sprite data with p5play sprites\n';
+  code += '  sprites.forEach((sprite, index) => {\n';
+  code += '    if (sprite.p5playSprite) {\n';
+  code += '      sprite.x = sprite.p5playSprite.x;\n';
+  code += '      sprite.y = sprite.p5playSprite.y;\n';
+  code += '    }\n';
+  code += '  });\n\n';
+
+  return code;
 }
-
-${spriteFunctions}${eventCode}`.trim();
-
-  return finalCode;
-};
+    
+    
