@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shapes, Code, Bug, FileJson } from 'lucide-react';
+import { Shapes, Code, Bug, FileJson, Info } from 'lucide-react';
 import { BlockPalette } from './BlockPalette';
 import { BlockWorkspace } from './BlockWorkspace';
 import { CodeEditor } from './CodeEditor';
@@ -18,7 +18,7 @@ interface LeftPanelProps {
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning = false }) => {
   const [activeWorkspace, setActiveWorkspace] = useState<'stage' | string>('stage');
-  const [viewMode, setViewMode] = useState<'blocks' | 'code' | 'debug' | 'json'>('blocks');
+  const [viewMode, setViewMode] = useState<'blocks' | 'code' | 'debug' | 'json' | 'about'>('blocks');
   const { sprites, selectedSprite } = useSpriteContext();
   const debugLogScrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -94,6 +94,17 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning 
               <FileJson size={14} />
               <span className="text-xs font-medium">JSON</span>
             </button>
+            <button
+              className={`flex items-center space-x-1 py-1 px-2 rounded-md transition-all duration-200 ${
+                viewMode === 'about'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-800'
+              }`}
+              onClick={() => setViewMode('about')}
+            >
+              <Info size={14} />
+              <span className="text-xs font-medium">About</span>
+            </button>
           </div>
         </div>
 
@@ -149,6 +160,160 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning 
         ) : viewMode === 'json' ? (
           <div className="flex-1">
             <JsonEditor />
+          </div>
+        ) : viewMode === 'about' ? (
+          <div className="flex-1 flex flex-col bg-white overflow-y-auto">
+            <div className="p-6">
+              <div className="mb-6">
+                <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                  Next-Generation Visual Programming
+                </h1>
+                <p className="text-gray-600 text-sm">
+                  The future of creative coding with WebGPU acceleration
+                </p>
+              </div>
+
+              <div className="space-y-6">
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    🚀 Next-Gen WebGPU Advantage
+                  </h2>
+                  <p className="text-sm text-gray-700 mb-3">
+                    While competitors use established WebGL for GPU acceleration, we compile directly to 
+                    q5 WebGPU renderer - the next generation of graphics API. WebGPU offers modern GPU architecture 
+                    access, better performance, and more efficient resource management than WebGL.
+                  </p>
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="font-medium text-green-800">WebGPU vs WebGL</span>
+                    </div>
+                    <p className="text-green-700">
+                      2-10x performance improvement over WebGL through q5 WebGPU renderer. 
+                      Lower CPU overhead, better multi-threading, and modern shader capabilities.
+                    </p>
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    ⚡ Direct JavaScript Compilation
+                  </h2>
+                  <p className="text-sm text-gray-700 mb-3">
+                    Unlike competitors that add abstraction layers, we compile directly to least-verbose JavaScript. 
+                    This means you're programming at the same abstraction level as JavaScript itself - no performance penalties.
+                  </p>
+                  
+                  <div className="bg-gray-50 border rounded-lg p-4">
+                    <div className="text-xs font-medium text-gray-600 mb-2">Generated Code Example:</div>
+                    <pre className="text-xs text-gray-800 overflow-x-auto"><code>{`// Async flowchart function for sprite_1750231210598
+async function startSpriteFlowchart_when_draw_1750231212913() {
+  const spriteIndex = 0;
+
+  while (true) {
+    try {
+      // Execute blocks in sequence
+      if (kb.pressing("w")) {
+        updateSprite(sprites[0].id, {x: sprites[0].x + 0, y: sprites[0].y + -10});
+      } else {
+        /* else not connected */
+      }
+      if (kb.pressing("s")) {
+        updateSprite(sprites[0].id, {x: sprites[0].x + 0, y: sprites[0].y + 10});
+      } else {
+        /* else not connected */
+      }
+      if (kb.pressing("a")) {
+        updateSprite(sprites[0].id, {x: sprites[0].x + -10, y: sprites[0].y + 0});
+      } else {
+        /* else not connected */
+      }
+      if (kb.pressing("d")) {
+        updateSprite(sprites[0].id, {x: sprites[0].x + 10, y: sprites[0].y + 0});
+      } else {
+        /* else not connected */
+      }
+      await waitFrames(1); // Small delay before next iteration
+    } catch (error) {
+      console.error('Sprite flowchart error:', error);
+      await waitFrames(60); // Wait 1 second before retrying
+    }
+  }
+}`}</code></pre>
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    🔗 Node-Based Architecture
+                  </h2>
+                  <p className="text-sm text-gray-700 mb-3">
+                    We use sophisticated node connections instead of traditional blocks. 
+                    This allows for more complex program flows and better represents the 
+                    underlying asynchronous JavaScript execution model.
+                  </p>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    ✨ Modern JavaScript Features
+                  </h2>
+                  <p className="text-sm text-gray-700 mb-3">
+                    Built on the latest ES standards with async/await, modern syntax, 
+                    and cutting-edge browser APIs. Your projects benefit from the newest 
+                    JavaScript innovations automatically.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-blue-50 border border-blue-200 rounded p-3">
+                      <div className="font-medium text-blue-800 mb-1">ES2024+ Features</div>
+                      <div className="text-blue-700 text-xs">async/await, modules, classes</div>
+                    </div>
+                    <div className="bg-purple-50 border border-purple-200 rounded p-3">
+                      <div className="font-medium text-purple-800 mb-1">Modern APIs</div>
+                      <div className="text-purple-700 text-xs">WebGPU, Canvas, Physics</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    🎯 Technical Stack
+                  </h2>
+                  <div className="bg-gray-50 border rounded-lg p-4">
+                    <div className="grid grid-cols-1 gap-2 text-sm">
+                                             <div className="flex justify-between">
+                         <span className="text-gray-600">Graphics Engine:</span>
+                         <span className="font-mono text-gray-800">q5.js v3.1.4</span>
+                       </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Game Framework:</span>
+                        <span className="font-mono text-gray-800">p5play v3.30.1</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Physics Engine:</span>
+                        <span className="font-mono text-gray-800">planck.js v1.4.2</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Compilation Target:</span>
+                        <span className="font-mono text-gray-800">ES2024+ JavaScript</span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    🎮 Why This Matters
+                  </h2>
+                  <p className="text-sm text-gray-700">
+                    While competitors offer solid WebGL-based performance, we're pioneering the next generation 
+                    with WebGPU. By leveraging q5 WebGPU renderer as the source of WebGPU innovation, we provide access to 
+                    cutting-edge GPU capabilities that represent the future of graphics programming. This gives 
+                    developers early access to tomorrow's graphics standards today.
+                  </p>
+                </section>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex-1 flex flex-col bg-white">

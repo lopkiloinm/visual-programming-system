@@ -677,6 +677,7 @@ function updateSprite(id, updates) {
       if (updates.opacity !== undefined) sprite.p5playSprite.opacity = updates.opacity;
       if (updates.scale !== undefined) sprite.p5playSprite.scale = updates.scale;
       if (updates.tint !== undefined) sprite.p5playSprite.tint = updates.tint;
+      if (updates.rotation !== undefined) sprite.p5playSprite.rotation = updates.rotation;
     }
   }
 }

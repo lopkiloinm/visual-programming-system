@@ -272,7 +272,7 @@ export const blockCategories: BlockCategory[] = [
           { type: 'number', name: 'vx', defaultValue: 5 },
           { type: 'number', name: 'vy', defaultValue: 0 }
         ],
-        code: 'sprites[0].setVelocity(${vx}, ${vy});'
+        code: 'if (sprites[0].p5playSprite.vel) { sprites[0].p5playSprite.vel.x = ${vx}; sprites[0].p5playSprite.vel.y = ${vy}; } else { sprites[0].p5playSprite.collider = "kinematic"; sprites[0].p5playSprite.vel.x = ${vx}; sprites[0].p5playSprite.vel.y = ${vy}; }'
       },
       {
         id: 'bounce_edges',
@@ -280,7 +280,7 @@ export const blockCategories: BlockCategory[] = [
         category: 'Motion',
         color: '#2563eb',
         type: 'action',
-        code: 'const halfWidth = width/2; const halfHeight = height/2; if (sprites[0].x < -halfWidth || sprites[0].x > halfWidth) sprites[0].vel.x *= -1; if (sprites[0].y < -halfHeight || sprites[0].y > halfHeight) sprites[0].vel.y *= -1;'
+        code: 'const sprite = sprites[0].p5playSprite; const halfW = width/2; const halfH = height/2; const size = sprites[0].size || 30; const radius = size/2; if (sprite.x - radius <= -halfW || sprite.x + radius >= halfW) { if (sprite.vel && sprite.vel.x) sprite.vel.x *= -1; sprite.x = sprite.x < 0 ? -halfW + radius : halfW - radius; } if (sprite.y - radius <= -halfH || sprite.y + radius >= halfH) { if (sprite.vel && sprite.vel.y) sprite.vel.y *= -1; sprite.y = sprite.y < 0 ? -halfH + radius : halfH - radius; }'
       },
       {
         id: 'change_sprite_color',
@@ -313,7 +313,7 @@ export const blockCategories: BlockCategory[] = [
         inputs: [
           { type: 'number', name: 'angle', defaultValue: 45 }
         ],
-        code: 'sprites[0].rotation += ${angle};'
+        code: 'updateSprite(sprites[0].id, {rotation: (sprites[0].rotation || 0) + ${angle}});'
       },
       {
         id: 'point_towards_mouse',
@@ -321,7 +321,18 @@ export const blockCategories: BlockCategory[] = [
         category: 'Motion',
         color: '#2563eb',
         type: 'action',
-        code: 'sprites[0].rotation = atan2((window.globalMouseY || 0) - sprites[0].y, (window.globalMouseX || 0) - sprites[0].x) * 180 / PI;'
+        code: 'updateSprite(sprites[0].id, {rotation: atan2((window.globalMouseY || 0) - sprites[0].y, (window.globalMouseX || 0) - sprites[0].x) * 180 / PI});'
+      },
+      {
+        id: 'move_forward',
+        label: 'move forward',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'distance', defaultValue: 10 }
+        ],
+        code: 'const angle = (sprites[0].p5playSprite.rotation || 0) * PI / 180; const dx = cos(angle) * ${distance}; const dy = sin(angle) * ${distance}; updateSprite(sprites[0].id, {x: sprites[0].x + dx, y: sprites[0].y + dy});'
       }
     ]
   },

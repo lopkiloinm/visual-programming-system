@@ -34,14 +34,14 @@ export const CodeEditor: React.FC = () => {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-3 bg-gray-50 border-b">
         <h3 className="text-sm font-semibold text-gray-700">Generated Code</h3>
-        <div className="text-xs text-gray-500">q5.js + p5play</div>
+        <div className="text-xs text-gray-500">📦 npm: q5@3.1.4 + p5play@3.30.1</div>
       </div>
       
       <div className="flex-1 overflow-hidden">
         <div className="h-full overflow-auto bg-gray-900 text-green-400 font-mono text-sm">
           <pre className="p-4 whitespace-pre-wrap">
             <code>
-              {formatCode(generatedCode) || '// Your q5.js + p5play code will appear here\n// Create blocks and connect them to generate code!\n\n// Example:\n// function setup() {\n//   createCanvas(480, 360);\n// }\n//\n// function draw() {\n//   background(255);\n//   // Your sprite actions will appear here\n// }'}
+              {formatCode(generatedCode) || '// Your q5.js + p5play code will appear here\n// Create blocks and connect them to generate code!\n// Using npm packages: q5@3.1.4, p5play@3.30.1, planck@1.4.2\n\n// Example:\n// function setup() {\n//   createCanvas(480, 360);\n// }\n//\n// function draw() {\n//   background(255);\n// }'}
             </code>
           </pre>
         </div>
