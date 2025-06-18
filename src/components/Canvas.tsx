@@ -431,7 +431,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           const executeAllCode = new Function(
             'q', 'world', 'p5playSprites', 'addDebugLog', 'codeScope', 'Sprite',
                 'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
-            'circle', 'ellipse', 'rect', 'mouseX', 'mouseY', 'width', 'height',
+            'circle', 'ellipse', 'rect', 'mouseX', 'mouseY', 'width', 'height', 'kb',
             `
             // Execute all generated code and manually assign variables to persistent scope
             with (codeScope) {
@@ -479,7 +479,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             q, worldRef.current, p5playSpritesRef.current, addDebugLog, codeExecutionScopeRef.current, SpriteClass,
             q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
             q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
-            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY, canvasSize.width, canvasSize.height
+            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY, canvasSize.width, canvasSize.height, q.kb
           );
           } catch (error: any) {
           addDebugLog(0, `Setup execution error: ${error.message}`, 'info');
@@ -501,7 +501,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           const executeCode = new Function(
               'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'addDebugLog', 'codeScope', 'Sprite',
             'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
-            'circle', 'ellipse', 'rect', 'width', 'height',
+            'circle', 'ellipse', 'rect', 'width', 'height', 'kb',
             `
               // Execute within the persistent scope that contains our variables
               with (codeScope) {
@@ -523,7 +523,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               addDebugLog, codeExecutionScopeRef.current, SpriteClass,
               q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
               q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
-              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), canvasSize.width, canvasSize.height
+              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), canvasSize.width, canvasSize.height, q.kb
           );
 
           } catch (error: any) {
@@ -556,7 +556,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // Execute mousePressed code from generated code
         try {
             const executeMousePressed = new Function(
-            'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'codeScope', 'Sprite',
+            'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'codeScope', 'Sprite', 'kb',
             `
             with (codeScope) {
               const sprites = Array.from(p5playSprites.values());
@@ -568,7 +568,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             `
           );
           const SpriteClass = (window as any).Sprite || (q as any).Sprite;
-          executeMousePressed(q, worldRef.current, p5playSpritesRef.current, q.mouseX, q.mouseY, codeExecutionScopeRef.current, SpriteClass);
+          executeMousePressed(q, worldRef.current, p5playSpritesRef.current, q.mouseX, q.mouseY, codeExecutionScopeRef.current, SpriteClass, q.kb);
           } catch (error: any) {
           addDebugLog(0, `MousePressed error: ${error.message}`, 'info');
               }

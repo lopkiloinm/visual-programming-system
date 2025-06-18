@@ -486,6 +486,22 @@ export const blockCategories: BlockCategory[] = [
             { label: 'speed', side: 'right', type: 'number' }
           ]
         }
+      },
+      {
+        id: 'key_pressed',
+        label: 'key pressed?',
+        category: 'Sensing',
+        color: '#8b5cf6',
+        type: 'value',
+        inputs: [
+          { type: 'text', name: 'key', defaultValue: 'space' }
+        ],
+        code: 'kb.pressing("${key}")',
+        labeledConnections: {
+          outputs: [
+            { label: 'pressed', side: 'right', type: 'boolean' }
+          ]
+        }
       }
     ]
   },
