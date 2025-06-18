@@ -280,7 +280,7 @@ export const blockCategories: BlockCategory[] = [
         category: 'Motion',
         color: '#2563eb',
         type: 'action',
-        code: 'if (sprites[0].x < 0 || sprites[0].x > 480) sprites[0].vel.x *= -1; if (sprites[0].y < 0 || sprites[0].y > 360) sprites[0].vel.y *= -1;'
+        code: 'const halfWidth = width/2; const halfHeight = height/2; if (sprites[0].x < -halfWidth || sprites[0].x > halfWidth) sprites[0].vel.x *= -1; if (sprites[0].y < -halfHeight || sprites[0].y > halfHeight) sprites[0].vel.y *= -1;'
       },
       {
         id: 'change_sprite_color',
