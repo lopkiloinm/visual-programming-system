@@ -3,8 +3,56 @@ import { Play, Pause, RotateCcw } from 'lucide-react';
 import { useBlockContext } from '../contexts/BlockContext';
 import { useSpriteContext } from '../contexts/SpriteContext';
 
-// Import Q5 normally as it doesn't have loading order dependencies
+// Import Q5 normally - it doesn't depend on other libraries
 import Q5 from 'q5';
+
+// We'll dynamically import planck and p5play to ensure proper loading order
+console.log('📦 Starting dynamic library loading...');
+
+// Function to ensure libraries are loaded in correct order
+const ensureLibrariesLoaded = async (): Promise<void> => {
+  // First, dynamically import planck and wait for it to be available
+  console.log('🔧 Loading planck...');
+  const planckModule = await import('planck');
+  
+  // Planck exports both directly and via default - p5play expects it on window.planck
+  // Use the full module (not just default) to ensure all classes are available
+  (window as any).planck = planckModule;
+  
+  // Also add the default export for compatibility
+  if (planckModule.default) {
+    (window as any).pl = planckModule.default;
+  }
+  
+  console.log('✅ planck ES module imported and exposed globally');
+  console.log('Available planck classes:', {
+    World: !!(window as any).planck.World,
+    Vec2: !!(window as any).planck.Vec2,
+    Body: !!(window as any).planck.Body
+  });
+  
+  // Verify planck is properly available
+  if (!(window as any).planck || !(window as any).planck.World) {
+    console.error('planck World class not found:', (window as any).planck);
+    throw new Error('planck World class not available - p5play will fail');
+  }
+  
+  console.log('✅ planck loaded and available globally for p5play');
+  
+  // Now load p5play after planck is confirmed available
+  console.log('🎮 Loading p5play...');
+  await import('p5play');
+  
+  // Wait a bit more to ensure p5play fully initializes
+  await new Promise(resolve => setTimeout(resolve, 200));
+  
+  console.log('✅ p5play loaded successfully');
+  console.log('📦 All libraries loaded in correct order:', {
+    q5: '3.1.4',
+    planck: '1.4.2 (loaded first)',
+    p5play: '3.30.1 (loaded after planck)'
+  });
+};
 
 // Extend Window interface for global mouse coordinates
 declare global {
@@ -23,89 +71,6 @@ let persistentDragState = {
   startX: 0,
   startY: 0,
   hasMoved: false
-};
-
-// Global flag to track if planck and p5play are loaded
-let librariesLoaded = false;
-let loadingPromise: Promise<void> | null = null;
-
-// Function to load scripts in proper order via script tags
-const ensureLibrariesLoaded = async (): Promise<void> => {
-  if (librariesLoaded) return;
-  
-  if (loadingPromise) {
-    return loadingPromise;
-  }
-  
-  loadingPromise = (async () => {
-    console.log('🔧 Loading planck.js physics engine via script tag...');
-    
-    // First, load planck.js via script tag to ensure it's globally available
-    await new Promise<void>((resolve, reject) => {
-      // Check if planck is already loaded
-      if ((window as any).planck || (window as any).pl) {
-        console.log('✅ planck.js already loaded globally');
-        resolve();
-        return;
-      }
-      
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/planck-js@0.3/dist/planck.min.js';
-      script.onload = () => {
-        console.log('✅ planck.js loaded successfully via CDN');
-        resolve();
-      };
-      script.onerror = () => {
-        console.error('❌ Failed to load planck.js via CDN');
-        reject(new Error('Failed to load planck.js'));
-      };
-      document.head.appendChild(script);
-    });
-    
-    // Wait a bit more to ensure planck is fully initialized
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    console.log('🎮 Loading p5play game framework via script tag...');
-    
-    // Now load p5play via script tag
-    await new Promise<void>((resolve, reject) => {
-      // Check if p5play is already loaded
-      if ((window as any).Sprite || (window as any).p5play) {
-        console.log('✅ p5play already loaded globally');
-        resolve();
-        return;
-      }
-      
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/p5play@latest';
-      script.onload = () => {
-        console.log('✅ p5play loaded successfully via CDN');
-        resolve();
-      };
-      script.onerror = () => {
-        console.error('❌ Failed to load p5play via CDN');
-        reject(new Error('Failed to load p5play'));
-      };
-      document.head.appendChild(script);
-    });
-    
-    // Wait a bit more to ensure libraries are fully initialized
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    console.log('✅ Both planck.js and p5play loaded successfully!');
-    console.log('Available globals:', {
-      planck: !!(window as any).planck,
-      pl: !!(window as any).pl,
-      Sprite: !!(window as any).Sprite,
-      p5play: !!(window as any).p5play,
-      planck_on_window: Object.keys(window).filter(k => k.toLowerCase().includes('planck')),
-      sprite_on_window: Object.keys(window).filter(k => k.toLowerCase().includes('sprite'))
-    });
-    
-    librariesLoaded = true;
-  })();
-  
-  return loadingPromise;
 };
 
 interface CanvasProps {
@@ -143,7 +108,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     type: 'action' | 'wait' | 'info';
     timestamp: number;
   }>>([]);
-  const [librariesReady, setLibrariesReady] = useState(false);
+  const [isWebGPU, setIsWebGPU] = useState<boolean>(false);
+  const [librariesLoaded, setLibrariesLoaded] = useState<boolean>(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const canvasSize = { width: 480, height: 360 }; // Fixed size as intended
   
@@ -153,6 +119,52 @@ export const Canvas: React.FC<CanvasProps> = ({
   const currentGeneratedCodeRef = useRef<string>(generatedCode);
   const globalFrameCountRef = useRef<number>(0);
   const codeExecutionScopeRef = useRef<any>({});
+  
+  // Drawing buffer for async-to-sync coordination
+  const drawingBufferRef = useRef<Array<{command: string, args: any[]}>>([]);
+  
+  // Drawing buffer functions
+  const addDrawCommand = (command: string, ...args: any[]) => {
+    drawingBufferRef.current.push({ command, args });
+  };
+  
+  const executeDrawBuffer = (q: any) => {
+    drawingBufferRef.current.forEach(({ command, args }) => {
+      try {
+        switch (command) {
+          case 'fill':
+            q.fill(...args);
+            break;
+          case 'background':
+            q.background(...args);
+            break;
+          case 'rect':
+            q.rect(...args);
+            break;
+          case 'circle':
+            q.circle(...args);
+            break;
+          case 'ellipse':
+            q.ellipse(...args);
+            break;
+          case 'stroke':
+            q.stroke(...args);
+            break;
+          case 'strokeWeight':
+            q.strokeWeight(...args);
+            break;
+          case 'noStroke':
+            q.noStroke();
+            break;
+          default:
+            console.warn(`Unknown drawing command: ${command}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to execute drawing command: ${command}`, error);
+      }
+    });
+    drawingBufferRef.current = []; // Clear buffer after execution
+  };
 
   // Load libraries on component mount
   useEffect(() => {
@@ -160,7 +172,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       try {
         setLoadingError(null);
         await ensureLibrariesLoaded();
-        setLibrariesReady(true);
+        setLibrariesLoaded(true);
       } catch (error: any) {
         console.error('❌ Failed to load libraries:', error);
         setLoadingError(error.message || 'Failed to load required libraries');
@@ -174,8 +186,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   useEffect(() => {
     currentGeneratedCodeRef.current = generatedCode;
   }, [generatedCode]);
-
-
 
   const debugLogScrollRef = useRef<HTMLDivElement>(null);
 
@@ -239,6 +249,27 @@ export const Canvas: React.FC<CanvasProps> = ({
     // Update ref immediately for draw loop access
     isRunningRef.current = newRunningState;
     
+    // Immediately control sprite movement based on new state
+    if (p5playSpritesRef.current) {
+      p5playSpritesRef.current.forEach((p5playSprite, spriteId) => {
+        if (newRunningState) {
+          // When resuming, restore stored velocity if it exists
+          if (p5playSprite.storedVel) {
+            p5playSprite.vel.x = p5playSprite.storedVel.x;
+            p5playSprite.vel.y = p5playSprite.storedVel.y;
+            delete p5playSprite.storedVel;
+          }
+        } else {
+          // When pausing, immediately store velocity and stop movement
+          if (p5playSprite.vel && (p5playSprite.vel.x !== 0 || p5playSprite.vel.y !== 0)) {
+            p5playSprite.storedVel = { x: p5playSprite.vel.x, y: p5playSprite.vel.y };
+            p5playSprite.vel.x = 0;
+            p5playSprite.vel.y = 0;
+          }
+        }
+      });
+    }
+    
     // Notify parent component of running state change
     if (onRunningStateChange) {
       onRunningStateChange(newRunningState);
@@ -291,6 +322,10 @@ export const Canvas: React.FC<CanvasProps> = ({
           p5playSprite.y = initialSprite.y;
           p5playSprite.vel.x = 0;
           p5playSprite.vel.y = 0;
+          // Clear any stored velocity from pause state
+          if (p5playSprite.storedVel) {
+            delete p5playSprite.storedVel;
+          }
         }
       });
     }
@@ -350,11 +385,21 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   useEffect(() => {
     // Don't create the sketch until libraries are loaded
-    if (!librariesReady || !canvasRef.current) return;
+    if (!librariesLoaded || !canvasRef.current) return;
 
     if (q5Instance.current) {
       q5Instance.current.remove();
     }
+
+    // Verify npm packages are now available after dynamic loading
+    console.log('📦 Using dynamically loaded packages:', {
+      q5: !!Q5,
+      q5Version: '3.1.4',
+      p5playAvailable: !!(window as any).Sprite,
+      planckAvailable: !!(window as any).planck || !!(window as any).pl,
+      p5playVersion: '3.30.1',
+      planckVersion: '1.4.2'
+    });
 
     // Parse the generated code to extract different function parts
     const parseGeneratedCode = (code: string) => {
@@ -395,7 +440,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     const sketch = (q: any) => {
       // q5.js + p5play setup
       q.setup = () => {
-        console.log(`Creating canvas: ${canvasSize.width} x ${canvasSize.height}`);
+        console.log(`✅ Creating canvas with npm packages: ${canvasSize.width} x ${canvasSize.height}`);
+        
+        // Verify planck is available before proceeding (critical for p5play)
+        const planckCheck = !!(window as any).planck || !!(window as any).pl;
+        if (!planckCheck) {
+          console.error('❌ CRITICAL: planck not available during setup - p5play will fail!');
+          addDebugLog(0, 'planck not found - p5play initialization will fail', 'info');
+          return; // Abort setup if planck is not available
+        }
+        console.log('✅ planck verified available for p5play initialization');
+        
         q.createCanvas(canvasSize.width, canvasSize.height);
         
         // Set white background immediately
@@ -412,17 +467,27 @@ export const Canvas: React.FC<CanvasProps> = ({
         // Positive X = right, Negative X = left
         // Positive Y = down, Negative Y = up
         
-        console.log('Applied translation for center-origin coordinate system');
+        console.log('✅ Applied translation for center-origin coordinate system');
         
         // Initialize p5play world with gravity disabled for 2D programming
-        (q as any).world.gravity.y = 0;
-        worldRef.current = (q as any).world;
+        try {
+          (q as any).world.gravity.y = 0;
+          worldRef.current = (q as any).world;
+          console.log('✅ p5play world initialized with zero gravity');
+        } catch (p5playError) {
+          console.error('❌ p5play world initialization failed:', p5playError);
+          addDebugLog(0, `p5play initialization failed: ${p5playError}`, 'info');
+          return;
+        }
         
         // Clear existing p5play sprites map
         p5playSpritesRef.current.clear();
         
         // Clear code execution scope for fresh start
         codeExecutionScopeRef.current = {};
+        
+        // Clear drawing buffer for fresh start
+        drawingBufferRef.current = [];
         
         // Let generated code handle all sprite creation - no duplicate sprites!
         
@@ -432,6 +497,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             'q', 'world', 'p5playSprites', 'addDebugLog', 'codeScope', 'Sprite',
                 'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
             'circle', 'ellipse', 'rect', 'mouseX', 'mouseY', 'width', 'height', 'kb',
+            'cos', 'sin', 'atan2', 'PI', 'dist', 'executeDrawBuffer', 'addDrawCommand',
             `
             // Execute all generated code and manually assign variables to persistent scope
             with (codeScope) {
@@ -458,6 +524,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                  if (typeof setup !== 'undefined') codeScope.setup = setup;
                  if (typeof draw !== 'undefined') codeScope.draw = draw;
                  if (typeof mousePressed !== 'undefined') codeScope.mousePressed = mousePressed;
+                 if (typeof executeDrawBuffer !== 'undefined') codeScope.executeDrawBuffer = executeDrawBuffer;
+                 if (typeof addDrawCommand !== 'undefined') codeScope.addDrawCommand = addDrawCommand;
                  
                  addDebugLog(0, 'Variables stored. codeScope has: ' + Object.keys(codeScope).join(', '), 'info');
                } catch (e) {
@@ -479,7 +547,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             q, worldRef.current, p5playSpritesRef.current, addDebugLog, codeExecutionScopeRef.current, SpriteClass,
             q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
             q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
-            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY, canvasSize.width, canvasSize.height, q.kb
+            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY, canvasSize.width, canvasSize.height, q.kb,
+            Math.cos, Math.sin, Math.atan2, Math.PI, q.dist,
+            () => executeDrawBuffer(q), addDrawCommand
           );
           } catch (error: any) {
           addDebugLog(0, `Setup execution error: ${error.message}`, 'info');
@@ -489,19 +559,39 @@ export const Canvas: React.FC<CanvasProps> = ({
       q.draw = () => {
         q.background(255);
         
+        // Control p5play sprite movement based on running state
+        if (p5playSpritesRef.current) {
+          p5playSpritesRef.current.forEach((p5playSprite, spriteId) => {
+            if (isRunningRef.current) {
+              // When running, restore stored velocity if it exists
+              if (p5playSprite.storedVel) {
+                p5playSprite.vel.x = p5playSprite.storedVel.x;
+                p5playSprite.vel.y = p5playSprite.storedVel.y;
+                delete p5playSprite.storedVel;
+              }
+            } else {
+              // When paused, store velocity and stop movement
+              if (p5playSprite.vel && (p5playSprite.vel.x !== 0 || p5playSprite.vel.y !== 0)) {
+                p5playSprite.storedVel = { x: p5playSprite.vel.x, y: p5playSprite.vel.y };
+                p5playSprite.vel.x = 0;
+                p5playSprite.vel.y = 0;
+              }
+            }
+          });
+        }
+        
         // Only execute generated code if running
         if (isRunningRef.current) {
           // Update debug frame counter for display
           setDebugFrameCount(prev => prev + 1);
-          
 
-          
           try {
             // Execute the draw logic from the persistent scope
           const executeCode = new Function(
               'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'addDebugLog', 'codeScope', 'Sprite',
             'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
             'circle', 'ellipse', 'rect', 'width', 'height', 'kb',
+            'cos', 'sin', 'atan2', 'PI', 'dist', 'executeDrawBuffer', 'addDrawCommand',
             `
               // Execute within the persistent scope that contains our variables
               with (codeScope) {
@@ -513,6 +603,11 @@ export const Canvas: React.FC<CanvasProps> = ({
               if (typeof draw === 'function') {
                 draw();
               }
+            
+              // Execute drawing buffer to render any buffered drawing commands
+              if (typeof executeDrawBuffer === 'function') {
+                executeDrawBuffer(q);
+              }
             }
             `
           );
@@ -523,15 +618,34 @@ export const Canvas: React.FC<CanvasProps> = ({
               addDebugLog, codeExecutionScopeRef.current, SpriteClass,
               q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
               q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
-              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), canvasSize.width, canvasSize.height, q.kb
+              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), canvasSize.width, canvasSize.height, q.kb,
+              Math.cos, Math.sin, Math.atan2, Math.PI, q.dist,
+              () => executeDrawBuffer(q), addDrawCommand
           );
 
           } catch (error: any) {
             addDebugLog(0, `Execution error: ${error.message}`, 'info');
           }
-              }
+        }
               
         // p5play automatically draws all sprites with q5.js - no need for manual drawSprites()
+      };
+
+      // Add required event handlers for q5.js compatibility
+      q.keyPressed = () => {
+        // Handle key press events - placeholder for future use
+      };
+      
+      q.keyReleased = () => {
+        // Handle key release events - placeholder for future use
+      };
+      
+      q.mouseClicked = () => {
+        // Handle mouse click events - placeholder for future use
+      };
+      
+      q.mouseMoved = () => {
+        // Handle mouse move events - placeholder for future use
       };
 
       // Mouse handling for sprite interaction
@@ -557,6 +671,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         try {
             const executeMousePressed = new Function(
             'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'codeScope', 'Sprite', 'kb',
+            'cos', 'sin', 'atan2', 'PI', 'dist',
             `
             with (codeScope) {
               const sprites = Array.from(p5playSprites.values());
@@ -568,7 +683,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             `
           );
           const SpriteClass = (window as any).Sprite || (q as any).Sprite;
-          executeMousePressed(q, worldRef.current, p5playSpritesRef.current, q.mouseX, q.mouseY, codeExecutionScopeRef.current, SpriteClass, q.kb);
+          executeMousePressed(q, worldRef.current, p5playSpritesRef.current, q.mouseX, q.mouseY, codeExecutionScopeRef.current, SpriteClass, q.kb, Math.cos, Math.sin, Math.atan2, Math.PI, q.dist);
           } catch (error: any) {
           addDebugLog(0, `MousePressed error: ${error.message}`, 'info');
               }
@@ -601,32 +716,38 @@ export const Canvas: React.FC<CanvasProps> = ({
               x: Math.round(p5playSprite.x),
               y: Math.round(p5playSprite.y)
             });
-
           }
           
           // Reset drag state
           persistentDragState.isDragging = false;
           persistentDragState.spriteId = null;
           persistentDragState.hasMoved = false;
-              }
+        }
       };
     };
 
-    // Create new q5.js instance with WebGPU for better performance
+    // Create new q5.js instance with WebGPU support when available
     const initializeQ5 = async () => {
       try {
-        // First try WebGPU
-        console.log('Attempting WebGPU initialization...');
-        q5Instance.current = await (Q5 as any).WebGPU(sketch, canvasRef.current);
-        console.log('✅ WebGPU initialized successfully');
-          } catch (error) {
+        // First try WebGPU for better performance (2-10x faster)
+        console.log('🚀 Attempting WebGPU initialization with npm Q5...');
+        if ((Q5 as any).WebGPU) {
+          q5Instance.current = await (Q5 as any).WebGPU(sketch, canvasRef.current);
+          console.log('✅ WebGPU initialized successfully with npm packages');
+          setIsWebGPU(true);
+            } else {
+          throw new Error('Q5.WebGPU not available');
+        }
+      } catch (error) {
         // Fallback to regular Q5 if WebGPU is not supported
-        console.warn('WebGPU not supported, falling back to regular Q5:', error);
+        console.warn('⚠️ WebGPU not supported, falling back to regular Q5:', error);
         try {
+          console.log('🔄 Initializing regular Q5 with npm package...');
           q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
-          console.log('✅ Regular Q5 initialized successfully');
+          console.log('✅ Regular Q5 initialized successfully with npm packages');
+          setIsWebGPU(false);
         } catch (fallbackError) {
-          console.error('❌ Failed to initialize Q5:', fallbackError);
+          console.error('❌ Failed to initialize Q5 with npm packages:', fallbackError);
           addDebugLog(0, `Canvas initialization failed: ${fallbackError}`, 'info');
         }
       }
@@ -640,7 +761,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         q5Instance.current = null;
       }
     };
-  }, [resetCounter, librariesReady]); // Canvas size is now fixed
+  }, [resetCounter, librariesLoaded]);
 
   // Show loading state while libraries are loading
   if (loadingError) {
@@ -665,24 +786,22 @@ export const Canvas: React.FC<CanvasProps> = ({
     );
   }
 
-  if (!librariesReady) {
+  if (!librariesLoaded) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 p-3 bg-gray-50 border-b">
-          <div className="text-sm text-gray-600">Loading q5.js + p5play...</div>
+          <div className="text-sm text-gray-600">Loading planck + p5play...</div>
         </div>
         <div className="flex-1 flex items-center justify-center bg-white">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
             <p className="mt-2 text-gray-600">Loading physics engine and game framework...</p>
-            <p className="mt-1 text-sm text-gray-500">This may take a few seconds on first load</p>
+            <p className="mt-1 text-sm text-gray-500">Ensuring proper loading order...</p>
           </div>
         </div>
       </div>
     );
   }
-
-
 
   return (
     <div className="flex flex-col h-full">
@@ -708,8 +827,25 @@ export const Canvas: React.FC<CanvasProps> = ({
           Reset
           </button>
         
-        <div className="text-sm text-gray-600 ml-2">
-          F:{debugFrameCount} | {isRunning ? 'RUN' : 'PAUSE'} | M:({Math.round((window as any).globalMouseX || 0)}, {Math.round((window as any).globalMouseY || 0)}) | Size:{canvasSize.width}x{canvasSize.height}
+        <div className="flex items-center gap-3 text-xs text-gray-600 ml-2">
+          <div className="w-12 text-center">
+            <span className="font-mono">{Math.round(q5Instance.current?.frameRate?.() || 0)}</span>
+            <div className="text-gray-400">FPS</div>
+        </div>
+          <div className="w-16 text-center">
+            <span className="font-mono">{debugFrameCount}</span>
+            <div className="text-gray-400">Frame</div>
+      </div>
+          <div className="w-20 text-center">
+            <span className="font-mono">({Math.round((window as any).globalMouseX || 0)},{Math.round((window as any).globalMouseY || 0)})</span>
+            <div className="text-gray-400">Mouse</div>
+            </div>
+          <div className="w-16 text-center">
+            <span className={`text-xs px-1 py-0.5 rounded ${isWebGPU ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+              {isWebGPU ? 'WebGPU' : 'Canvas'}
+            </span>
+            <div className="text-gray-400">Render</div>
+          </div>
         </div>
         
         {debugInfo.currentAction && (
@@ -729,7 +865,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         <div className="flex-1 bg-gray-100 flex items-center justify-center p-4 relative">
           <div className="bg-white rounded-lg shadow-lg p-4 max-w-full max-h-full">
             <div className="text-xs text-gray-500 text-center mb-2">
-              Canvas: {canvasSize.width} × {canvasSize.height} | Center-Origin (0,0) | Bounds: (-240,-180) to (240,180)
+              {canvasSize.width}×{canvasSize.height} | Center (0,0)
             </div>
         <div 
           ref={canvasRef}
