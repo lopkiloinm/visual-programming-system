@@ -145,6 +145,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   }>>([]);
   const [librariesReady, setLibrariesReady] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
+  const canvasSize = { width: 480, height: 360 }; // Fixed size as intended
   
   // p5play specific refs
   const p5playSpritesRef = useRef<Map<string, any>>(new Map());
@@ -173,6 +174,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   useEffect(() => {
     currentGeneratedCodeRef.current = generatedCode;
   }, [generatedCode]);
+
+
 
   const debugLogScrollRef = useRef<HTMLDivElement>(null);
 
@@ -392,13 +395,24 @@ export const Canvas: React.FC<CanvasProps> = ({
     const sketch = (q: any) => {
       // q5.js + p5play setup
       q.setup = () => {
-        q.createCanvas(480, 360);
+        console.log(`Creating canvas: ${canvasSize.width} x ${canvasSize.height}`);
+        q.createCanvas(canvasSize.width, canvasSize.height);
         
-        // 🎯 WebGPU Center-Origin Coordinate System
-        // (0,0) = center of canvas (240,180 in old system)
+        // Set white background immediately
+        q.background(255);
+        
+        // 🎯 CRITICAL: Translate coordinate system to center origin
+        // Move (0,0) from top-left to center of canvas
+        q.translate(canvasSize.width / 2, canvasSize.height / 2);
+        
+        // Now we have Center-Origin Coordinate System (480x360 canvas)
+        // (0,0) = center of canvas
+        // Top-left corner = (-240, -180)
+        // Bottom-right corner = (240, 180)  
         // Positive X = right, Negative X = left
         // Positive Y = down, Negative Y = up
-        // This is more natural for graphics and game programming!
+        
+        console.log('Applied translation for center-origin coordinate system');
         
         // Initialize p5play world with gravity disabled for 2D programming
         (q as any).world.gravity.y = 0;
@@ -417,7 +431,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           const executeAllCode = new Function(
             'q', 'world', 'p5playSprites', 'addDebugLog', 'codeScope', 'Sprite',
                 'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
-            'circle', 'ellipse', 'rect', 'mouseX', 'mouseY',
+            'circle', 'ellipse', 'rect', 'mouseX', 'mouseY', 'width', 'height',
             `
             // Execute all generated code and manually assign variables to persistent scope
             with (codeScope) {
@@ -465,7 +479,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             q, worldRef.current, p5playSpritesRef.current, addDebugLog, codeExecutionScopeRef.current, SpriteClass,
             q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
             q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
-            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY
+            q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), q.mouseX, q.mouseY, canvasSize.width, canvasSize.height
           );
           } catch (error: any) {
           addDebugLog(0, `Setup execution error: ${error.message}`, 'info');
@@ -487,7 +501,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           const executeCode = new Function(
               'q', 'world', 'p5playSprites', 'mouseX', 'mouseY', 'addDebugLog', 'codeScope', 'Sprite',
             'createCanvas', 'background', 'fill', 'stroke', 'noStroke', 'strokeWeight', 
-            'circle', 'ellipse', 'rect',
+            'circle', 'ellipse', 'rect', 'width', 'height',
             `
               // Execute within the persistent scope that contains our variables
               with (codeScope) {
@@ -509,7 +523,7 @@ export const Canvas: React.FC<CanvasProps> = ({
               addDebugLog, codeExecutionScopeRef.current, SpriteClass,
               q.createCanvas.bind(q), q.background.bind(q), q.fill.bind(q), 
               q.stroke.bind(q), q.noStroke.bind(q), q.strokeWeight.bind(q),
-              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q)
+              q.circle.bind(q), q.ellipse.bind(q), q.rect.bind(q), canvasSize.width, canvasSize.height
           );
 
           } catch (error: any) {
@@ -601,11 +615,20 @@ export const Canvas: React.FC<CanvasProps> = ({
     // Create new q5.js instance with WebGPU for better performance
     const initializeQ5 = async () => {
       try {
+        // First try WebGPU
+        console.log('Attempting WebGPU initialization...');
         q5Instance.current = await (Q5 as any).WebGPU(sketch, canvasRef.current);
-      } catch (error) {
+        console.log('✅ WebGPU initialized successfully');
+          } catch (error) {
         // Fallback to regular Q5 if WebGPU is not supported
         console.warn('WebGPU not supported, falling back to regular Q5:', error);
-        q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
+        try {
+          q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
+          console.log('✅ Regular Q5 initialized successfully');
+        } catch (fallbackError) {
+          console.error('❌ Failed to initialize Q5:', fallbackError);
+          addDebugLog(0, `Canvas initialization failed: ${fallbackError}`, 'info');
+        }
       }
     };
     
@@ -617,7 +640,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         q5Instance.current = null;
       }
     };
-  }, [resetCounter, librariesReady]); // Now depends on librariesReady
+  }, [resetCounter, librariesReady]); // Canvas size is now fixed
 
   // Show loading state while libraries are loading
   if (loadingError) {
@@ -686,7 +709,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           </button>
         
         <div className="text-sm text-gray-600 ml-2">
-          F:{debugFrameCount} | {isRunning ? 'RUN' : 'PAUSE'} | M:({Math.round((window as any).globalMouseX || 0)}, {Math.round((window as any).globalMouseY || 0)})
+          F:{debugFrameCount} | {isRunning ? 'RUN' : 'PAUSE'} | M:({Math.round((window as any).globalMouseX || 0)}, {Math.round((window as any).globalMouseY || 0)}) | Size:{canvasSize.width}x{canvasSize.height}
         </div>
         
         {debugInfo.currentAction && (
@@ -699,15 +722,28 @@ export const Canvas: React.FC<CanvasProps> = ({
           </div>
         )}
       </div>
-        
+      
       {/* Canvas and Debug Log */}
-      <div className="flex flex-1">
+      <div className="flex flex-1 overflow-hidden">
         {/* Canvas */}
-        <div className="flex-1 bg-white">
-          <div ref={canvasRef} className="w-full h-full" />
+        <div className="flex-1 bg-gray-100 flex items-center justify-center p-4 relative">
+          <div className="bg-white rounded-lg shadow-lg p-4 max-w-full max-h-full">
+            <div className="text-xs text-gray-500 text-center mb-2">
+              Canvas: {canvasSize.width} × {canvasSize.height} | Center-Origin (0,0) | Bounds: (-240,-180) to (240,180)
+            </div>
+        <div 
+          ref={canvasRef}
+              className="block overflow-hidden"
+              style={{ 
+                width: canvasSize.width + 'px', 
+                height: canvasSize.height + 'px',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                border: '1px solid #e5e7eb'
+              }}
+            />
+          </div>
         </div>
-        
-
       </div>
     </div>
   );
