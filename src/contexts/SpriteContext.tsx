@@ -81,8 +81,8 @@ export const SpriteProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (!sprite.name) {
         sprite.name = `Sprite ${sprite.id}`;
       }
-      if (!sprite.x) sprite.x = 200;
-      if (!sprite.y) sprite.y = 200;
+      if (!sprite.x) sprite.x = 0;
+      if (!sprite.y) sprite.y = 0;
       if (!sprite.color) sprite.color = '#ff6b6b';
       return sprite;
     });

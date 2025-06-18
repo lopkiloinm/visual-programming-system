@@ -394,6 +394,12 @@ export const Canvas: React.FC<CanvasProps> = ({
       q.setup = () => {
         q.createCanvas(480, 360);
         
+        // 🎯 WebGPU Center-Origin Coordinate System
+        // (0,0) = center of canvas (240,180 in old system)
+        // Positive X = right, Negative X = left
+        // Positive Y = down, Negative Y = up
+        // This is more natural for graphics and game programming!
+        
         // Initialize p5play world with gravity disabled for 2D programming
         (q as any).world.gravity.y = 0;
         worldRef.current = (q as any).world;
@@ -592,8 +598,18 @@ export const Canvas: React.FC<CanvasProps> = ({
       };
     };
 
-    // Create new q5.js instance with p5play
-    q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
+    // Create new q5.js instance with WebGPU for better performance
+    const initializeQ5 = async () => {
+      try {
+        q5Instance.current = await (Q5 as any).WebGPU(sketch, canvasRef.current);
+      } catch (error) {
+        // Fallback to regular Q5 if WebGPU is not supported
+        console.warn('WebGPU not supported, falling back to regular Q5:', error);
+        q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
+      }
+    };
+    
+    initializeQ5();
 
     return () => {
       if (q5Instance.current) {

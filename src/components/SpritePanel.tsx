@@ -20,8 +20,8 @@ export const SpritePanel: React.FC = () => {
     addSprite({
       id: `sprite_${Date.now()}`,
       name: `Sprite ${sprites.length + 1}`,
-      x: 240, // Center of canvas
-      y: 180, // Center of canvas
+      x: 0, // Center of canvas (WebGPU coordinate system)
+      y: 0, // Center of canvas (WebGPU coordinate system)
       size: 30,
       color: generateRandomColor(),
       waitUntilFrame: 0

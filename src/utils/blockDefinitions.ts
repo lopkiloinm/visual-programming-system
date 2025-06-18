@@ -171,8 +171,8 @@ export const blockCategories: BlockCategory[] = [
         color: '#059669',
         type: 'action',
         inputs: [
-          { type: 'number', name: 'x', defaultValue: 240 },
-          { type: 'number', name: 'y', defaultValue: 180 },
+          { type: 'number', name: 'x', defaultValue: 0 },
+          { type: 'number', name: 'y', defaultValue: 0 },
           { type: 'number', name: 'size', defaultValue: 30 }
         ],
         code: 'circle(${x}, ${y}, ${size});'
@@ -225,8 +225,8 @@ export const blockCategories: BlockCategory[] = [
         color: '#2563eb',
         type: 'action',
         inputs: [
-          { type: 'number', name: 'x', defaultValue: 240 },
-          { type: 'number', name: 'y', defaultValue: 180 }
+          { type: 'number', name: 'x', defaultValue: 0 },
+          { type: 'number', name: 'y', defaultValue: 0 }
         ],
         code: 'updateSprite(sprites[0].id, {x: ${x}, y: ${y}});'
       },
@@ -245,8 +245,8 @@ export const blockCategories: BlockCategory[] = [
         color: '#2563eb',
         type: 'action',
         inputs: [
-          { type: 'number', name: 'x', defaultValue: 240 },
-          { type: 'number', name: 'y', defaultValue: 180 },
+          { type: 'number', name: 'x', defaultValue: 0 },
+          { type: 'number', name: 'y', defaultValue: 0 },
           { type: 'number', name: 'speed', defaultValue: 2 }
         ],
         code: 'sprites[0].moveTo(${x}, ${y}, ${speed});'
