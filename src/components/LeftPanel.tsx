@@ -197,11 +197,24 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning 
 
                 <section>
                   <h2 className="text-lg font-semibold text-gray-800 mb-3">
-                    ⚡ Direct JavaScript Compilation
+                    ⚡ Direct JavaScript Transpilation
                   </h2>
                   <p className="text-sm text-gray-700 mb-3">
-                    Unlike competitors that add abstraction layers, we compile directly to least-verbose JavaScript. 
-                    This means you're programming at the same abstraction level as JavaScript itself - no performance penalties.
+                    Unlike competitors that add abstraction layers, we transpile directly to least-verbose JavaScript. 
+                    Think of this like TypeScript - both are high-level languages that transpile to clean JavaScript, 
+                    maintaining the same performance characteristics while adding structured programming features.
+                  </p>
+                  
+                  <p className="text-sm text-gray-700 mb-3">
+                    While modern JavaScript is still an order of magnitude slower than native languages for compute-intensive tasks, 
+                    for simple logic with graphics-intensive workloads, performance is equivalent because graphics rendering 
+                    becomes the bottleneck, not the logic processing.
+                  </p>
+                  
+                  <p className="text-sm text-gray-700 mb-3">
+                    <strong>Note:</strong> Browser games can achieve true native-speed performance using WebAssembly (WASM) compilation. 
+                    However, we chose JavaScript for maximum accessibility and ease of debugging, since our target workloads 
+                    are graphics-bottlenecked rather than compute-intensive.
                   </p>
                   
                   <div className="bg-gray-50 border rounded-lg p-4">
@@ -245,13 +258,64 @@ async function startSpriteFlowchart_when_draw_1750231212913() {
 
                 <section>
                   <h2 className="text-lg font-semibold text-gray-800 mb-3">
-                    🔗 Node-Based Architecture
+                    🔗 Advanced Node Graph System
                   </h2>
                   <p className="text-sm text-gray-700 mb-3">
-                    We use sophisticated node connections instead of traditional blocks. 
-                    This allows for more complex program flows and better represents the 
-                    underlying asynchronous JavaScript execution model.
+                    Our node-based architecture represents a fundamental shift from traditional block programming. 
+                    Each program is a graph of interconnected nodes that form complex execution networks, 
+                    similar to professional tools like Unreal Engine's Blueprint system or Blender's shader nodes.
                   </p>
+                  
+                  <p className="text-sm text-gray-700 mb-3">
+                    Unlike linear block sequences, our node graphs create true visual programs where data flows 
+                    through connections between nodes, multiple execution paths can run simultaneously, and 
+                    complex behaviors emerge from simple node interactions. Async operations are naturally 
+                    represented without awkward workarounds.
+                  </p>
+
+                  <p className="text-sm text-gray-700 mb-3">
+                    <strong>The Deep Nesting Problem:</strong> Traditional blocks encourage harmful practices through easy deep nesting. 
+                    Competitors make it trivial to create massive, deeply nested "super blocks" that become unmaintainable 
+                    and impossible to debug, leading to monolithic code structures.
+                  </p>
+
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-3">
+                    <h3 className="font-medium text-indigo-800 mb-2">State Machine Representation</h3>
+                    <p className="text-sm text-indigo-700">
+                      Our node graphs mirror classical state machine representations, making complex program logic 
+                      intuitive to understand. Each node represents a state or operation, with clear transitions 
+                      between them. This matches how computer scientists think about program flow and makes 
+                      debugging and modification straightforward.
+                    </p>
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    🌐 Procedural Game Development
+                  </h2>
+                  <p className="text-sm text-gray-700 mb-3">
+                    Our system functions as a procedural framework for game creation. Programs are constructed 
+                    as node networks that generate interactive content, sprite behaviors, and game mechanics 
+                    through algorithmic processes rather than manual scripting.
+                  </p>
+                  
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <h3 className="font-medium text-amber-800 mb-2">Professional Workflow Paradigm</h3>
+                    <p className="text-sm text-amber-700 mb-2">
+                      This approach mirrors industry-standard tools:
+                    </p>
+                    <ul className="text-sm text-amber-700 space-y-1 ml-4">
+                      <li>• Game engines (Unreal Blueprint, Unity Visual Scripting)</li>
+                      <li>• 3D software (Maya nodes, Blender geometry nodes)</li>
+                      <li>• Creative tools (TouchDesigner, Max/MSP)</li>
+                      <li>• AI platforms (ComfyUI, AUTOMATIC1111)</li>
+                    </ul>
+                    <p className="text-sm text-amber-700 mt-2">
+                      What makes our system unique is combining this professional node paradigm 
+                      with accessible visual programming for game development.
+                    </p>
+                  </div>
                 </section>
 
                 <section>
@@ -277,6 +341,52 @@ async function startSpriteFlowchart_when_draw_1750231212913() {
 
                 <section>
                   <h2 className="text-lg font-semibold text-gray-800 mb-3">
+                    🎭 Dispelling Performance Myths
+                  </h2>
+                  <p className="text-sm text-gray-700 mb-3">
+                    One of the biggest misconceptions in modern development is that browser applications 
+                    are much slower than downloaded software. This belief stems from outdated 
+                    experiences with early web technologies like Adobe Flash.
+                  </p>
+
+                  <p className="text-sm text-gray-700 mb-3">
+                    <strong>The Flash Legacy Problem:</strong> Adobe Flash was single-threaded, unoptimized for GPU acceleration, 
+                    and couldn't leverage multicore processors or parallel computing. This created the false impression 
+                    that "browser games are always slow." Flash's limitations became synonymous with web gaming performance 
+                    in many people's minds.
+                  </p>
+
+                  <p className="text-sm text-gray-700 mb-3">
+                    <strong>Parallel Computing Misconception:</strong> Another myth is that browser game software doesn't utilize 
+                    parallel computing or multithreading. Modern browser games absolutely do use sophisticated parallel processing 
+                    for physics, rendering, AI, and audio. Our WebGPU approach gives browser games access to the same 
+                    multicore and GPU parallel computing capabilities that desktop games have always used.
+                  </p>
+                  
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-3">
+                    <h3 className="font-medium text-purple-800 mb-2">Modern Web = Native Graphics Performance</h3>
+                    <p className="text-sm text-purple-700">
+                      With q5 WebGPU renderer and modern JavaScript JIT compilation, browser games achieve graphics
+                      performance equivalent to downloaded applications. WebGPU provides direct access to 
+                      GPU parallel processing, while modern browsers leverage multicore CPUs through 
+                      Web Workers and optimized JavaScript engines.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-red-50 border border-red-200 rounded p-3">
+                      <div className="font-medium text-red-800 mb-1">Flash Era</div>
+                      <div className="text-red-700 text-xs">Single-threaded, no GPU, limited CPU</div>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded p-3">
+                      <div className="font-medium text-green-800 mb-1">WebGPU Era</div>
+                      <div className="text-green-700 text-xs">Multithreaded, GPU parallel, multicore</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <h2 className="text-lg font-semibold text-gray-800 mb-3">
                     🎯 Technical Stack
                   </h2>
                   <div className="bg-gray-50 border rounded-lg p-4">
@@ -293,10 +403,10 @@ async function startSpriteFlowchart_when_draw_1750231212913() {
                         <span className="text-gray-600">Physics Engine:</span>
                         <span className="font-mono text-gray-800">planck.js v1.4.2</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Compilation Target:</span>
-                        <span className="font-mono text-gray-800">ES2024+ JavaScript</span>
-                      </div>
+                                             <div className="flex justify-between">
+                         <span className="text-gray-600">Transpilation Target:</span>
+                         <span className="font-mono text-gray-800">ES2024+ JavaScript</span>
+                       </div>
                     </div>
                   </div>
                 </section>
@@ -318,9 +428,9 @@ async function startSpriteFlowchart_when_draw_1750231212913() {
         ) : (
           <div className="flex-1 flex flex-col bg-white">
             <div className="p-4 border-b border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-800 mb-1">Action Queue Debug Log</h3>
+              <h3 className="text-sm font-semibold text-gray-800 mb-1">Debug Log</h3>
               <p className="text-xs text-gray-600">
-                Real-time execution trace for sprite action sequences
+                Real-time execution trace for system events and operations
               </p>
               <div className="mt-2 text-xs text-gray-500">
                 {debugLogs.length} logs {debugLogs.length >= 50 && "(showing last 50)"} •{" "}

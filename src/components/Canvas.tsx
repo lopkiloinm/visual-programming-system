@@ -7,12 +7,11 @@ import { useSpriteContext } from '../contexts/SpriteContext';
 import Q5 from 'q5';
 
 // We'll dynamically import planck and p5play to ensure proper loading order
-console.log('📦 Starting dynamic library loading...');
+    // Debug log will be added when addDebugLog is available in component scope
 
 // Function to ensure libraries are loaded in correct order
 const ensureLibrariesLoaded = async (): Promise<void> => {
   // First, dynamically import planck and wait for it to be available
-  console.log('🔧 Loading planck...');
   const planckModule = await import('planck');
   
   // Planck exports both directly and via default - p5play expects it on window.planck
@@ -24,34 +23,16 @@ const ensureLibrariesLoaded = async (): Promise<void> => {
     (window as any).pl = planckModule.default;
   }
   
-  console.log('✅ planck ES module imported and exposed globally');
-  console.log('Available planck classes:', {
-    World: !!(window as any).planck.World,
-    Vec2: !!(window as any).planck.Vec2,
-    Body: !!(window as any).planck.Body
-  });
-  
   // Verify planck is properly available
   if (!(window as any).planck || !(window as any).planck.World) {
-    console.error('planck World class not found:', (window as any).planck);
     throw new Error('planck World class not available - p5play will fail');
   }
   
-  console.log('✅ planck loaded and available globally for p5play');
-  
   // Now load p5play after planck is confirmed available
-  console.log('🎮 Loading p5play...');
   await import('p5play');
   
   // Wait a bit more to ensure p5play fully initializes
   await new Promise(resolve => setTimeout(resolve, 200));
-  
-  console.log('✅ p5play loaded successfully');
-  console.log('📦 All libraries loaded in correct order:', {
-    q5: '3.1.4',
-    planck: '1.4.2 (loaded first)',
-    p5play: '3.30.1 (loaded after planck)'
-  });
 };
 
 // Extend Window interface for global mouse coordinates
@@ -391,15 +372,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       q5Instance.current.remove();
     }
 
-    // Verify npm packages are now available after dynamic loading
-    console.log('📦 Using dynamically loaded packages:', {
-      q5: !!Q5,
-      q5Version: '3.1.4',
-      p5playAvailable: !!(window as any).Sprite,
-      planckAvailable: !!(window as any).planck || !!(window as any).pl,
-      p5playVersion: '3.30.1',
-      planckVersion: '1.4.2'
-    });
+    // Log library verification to debug log
+    addDebugLog(0, '📦 Libraries loaded: q5 v3.1.4, p5play v3.30.1, planck v1.4.2', 'info');
 
     // Parse the generated code to extract different function parts
     const parseGeneratedCode = (code: string) => {
@@ -440,16 +414,15 @@ export const Canvas: React.FC<CanvasProps> = ({
     const sketch = (q: any) => {
       // q5.js + p5play setup
       q.setup = () => {
-        console.log(`✅ Creating canvas with npm packages: ${canvasSize.width} x ${canvasSize.height}`);
+        addDebugLog(0, `✅ Creating canvas ${canvasSize.width}x${canvasSize.height}`, 'info');
         
         // Verify planck is available before proceeding (critical for p5play)
         const planckCheck = !!(window as any).planck || !!(window as any).pl;
         if (!planckCheck) {
-          console.error('❌ CRITICAL: planck not available during setup - p5play will fail!');
-          addDebugLog(0, 'planck not found - p5play initialization will fail', 'info');
+          addDebugLog(0, '❌ CRITICAL: planck not available - p5play will fail!', 'info');
           return; // Abort setup if planck is not available
         }
-        console.log('✅ planck verified available for p5play initialization');
+        addDebugLog(0, '✅ planck verified for p5play initialization', 'info');
         
         q.createCanvas(canvasSize.width, canvasSize.height);
         
@@ -467,16 +440,15 @@ export const Canvas: React.FC<CanvasProps> = ({
         // Positive X = right, Negative X = left
         // Positive Y = down, Negative Y = up
         
-        console.log('✅ Applied translation for center-origin coordinate system');
+        addDebugLog(0, '✅ Applied center-origin coordinate system', 'info');
         
         // Initialize p5play world with gravity disabled for 2D programming
         try {
           (q as any).world.gravity.y = 0;
           worldRef.current = (q as any).world;
-          console.log('✅ p5play world initialized with zero gravity');
+          addDebugLog(0, '✅ p5play world initialized with zero gravity', 'info');
         } catch (p5playError) {
-          console.error('❌ p5play world initialization failed:', p5playError);
-          addDebugLog(0, `p5play initialization failed: ${p5playError}`, 'info');
+          addDebugLog(0, `❌ p5play world initialization failed: ${p5playError}`, 'info');
           return;
         }
         
@@ -730,25 +702,24 @@ export const Canvas: React.FC<CanvasProps> = ({
     const initializeQ5 = async () => {
       try {
         // First try WebGPU for better performance (2-10x faster)
-        console.log('🚀 Attempting WebGPU initialization with npm Q5...');
+        addDebugLog(0, '🚀 Attempting WebGPU initialization...', 'info');
         if ((Q5 as any).WebGPU) {
           q5Instance.current = await (Q5 as any).WebGPU(sketch, canvasRef.current);
-          console.log('✅ WebGPU initialized successfully with npm packages');
+          addDebugLog(0, '✅ WebGPU initialized successfully', 'info');
           setIsWebGPU(true);
             } else {
           throw new Error('Q5.WebGPU not available');
         }
       } catch (error) {
         // Fallback to regular Q5 if WebGPU is not supported
-        console.warn('⚠️ WebGPU not supported, falling back to regular Q5:', error);
+        addDebugLog(0, '⚠️ WebGPU not supported, falling back to Canvas2D', 'info');
         try {
-          console.log('🔄 Initializing regular Q5 with npm package...');
+          addDebugLog(0, '🔄 Initializing Canvas2D renderer...', 'info');
           q5Instance.current = new (Q5 as any)(sketch, canvasRef.current);
-          console.log('✅ Regular Q5 initialized successfully with npm packages');
+          addDebugLog(0, '✅ Canvas2D renderer initialized successfully', 'info');
           setIsWebGPU(false);
         } catch (fallbackError) {
-          console.error('❌ Failed to initialize Q5 with npm packages:', fallbackError);
-          addDebugLog(0, `Canvas initialization failed: ${fallbackError}`, 'info');
+          addDebugLog(0, `❌ Canvas initialization failed: ${fallbackError}`, 'info');
         }
       }
     };

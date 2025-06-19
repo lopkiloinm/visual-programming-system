@@ -684,7 +684,10 @@ function updateSprite(id, updates) {
 
 // Enhanced debug logging for q5.js + p5play
 function addDebugLog(frame, message, type) {
-  console.log(\`[q5+p5play] Frame \${frame}: \${message}\`);
+  // This will be overridden by the actual addDebugLog function from Canvas component
+  if (typeof window !== 'undefined' && window.debugLog) {
+    window.debugLog(frame, message, type);
+  }
 }
 
 // Drawing buffer management functions
