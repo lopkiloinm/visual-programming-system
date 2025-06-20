@@ -29,17 +29,27 @@ export const SpritePanel: React.FC = () => {
   };
 
   const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
     setIsResizing(true);
     const startY = e.clientY;
     const startHeight = panelHeight;
 
+    // Prevent text selection during resize
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+
     const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
       const deltaY = startY - e.clientY;
       const newHeight = Math.max(120, Math.min(400, startHeight + deltaY));
       setPanelHeight(newHeight);
     };
 
     const handleMouseUp = () => {
+      // Restore text selection
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      
       setIsResizing(false);
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
@@ -55,12 +65,12 @@ export const SpritePanel: React.FC = () => {
       style={{ height: panelHeight }}
     >
       <div 
-        className={`w-full h-1 bg-gray-300 hover:bg-blue-500 cursor-row-resize transition-colors duration-200 flex items-center justify-center ${
+        className={`w-full h-1 bg-gray-300 hover:bg-blue-500 cursor-row-resize transition-colors duration-200 flex items-center justify-center select-none ${
           isResizing ? 'bg-blue-500' : ''
         }`}
         onMouseDown={handleResizeStart}
       >
-        <div className="w-8 h-0.5 bg-gray-400 hover:bg-white transition-colors duration-200"></div>
+        <div className="w-8 h-0.5 bg-gray-400 hover:bg-white transition-colors duration-200 select-none"></div>
       </div>
       
       <div className="p-3 flex-1 flex flex-col min-h-0">
@@ -68,7 +78,7 @@ export const SpritePanel: React.FC = () => {
           <h3 className="text-sm font-semibold text-gray-700">Sprites</h3>
           <button
             onClick={handleAddSprite}
-            className="flex items-center space-x-1 px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 transition-colors duration-200"
+            className="flex items-center space-x-1 px-2 py-1 bg-blue-500 text-white text-xs hover:bg-blue-600 transition-colors duration-200"
           >
             <Plus size={12} />
             <span>Add</span>
@@ -83,11 +93,11 @@ export const SpritePanel: React.FC = () => {
               <p className="text-xs mt-1">Click "Add" to create a draggable sprite</p>
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-1">
               {sprites.map((sprite) => (
                 <div
                   key={sprite.id}
-                  className={`p-2 rounded border cursor-pointer transition-all duration-200 ${
+                  className={`p-1.5 border cursor-pointer transition-all duration-200 ${
                     selectedSprite?.id === sprite.id
                       ? 'border-blue-500 bg-blue-50'
                       : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
@@ -99,14 +109,14 @@ export const SpritePanel: React.FC = () => {
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center space-x-1 min-w-0">
                       <div
-                        className="w-3 h-3 rounded-full flex-shrink-0 border border-white shadow-sm"
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-white shadow-sm"
                         style={{ backgroundColor: sprite.color }}
                       ></div>
                       <span className="text-xs font-medium text-gray-800 truncate">
                         {sprite.name}
                       </span>
                     </div>
-                    <Settings size={10} className="text-gray-400 flex-shrink-0" />
+                    <Settings size={8} className="text-gray-400 flex-shrink-0" />
                   </div>
                   <div className="text-xs text-gray-500">
                     <div className="truncate">

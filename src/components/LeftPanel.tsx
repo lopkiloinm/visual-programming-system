@@ -4,6 +4,7 @@ import { BlockPalette } from './BlockPalette';
 import { BlockWorkspace } from './BlockWorkspace';
 import { CodeEditor } from './CodeEditor';
 import { JsonEditor } from './JsonEditor';
+import { VariableManager } from './VariableManager';
 import { useSpriteContext } from '../contexts/SpriteContext';
 
 interface LeftPanelProps {
@@ -148,10 +149,15 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({ debugLogs = [], isRunning 
         {viewMode === 'blocks' ? (
           <>
             <BlockPalette />
-            <BlockWorkspace 
-              spriteId={activeWorkspace === 'stage' ? undefined : activeWorkspace}
-              isStage={activeWorkspace === 'stage'}
-            />
+            <div className="flex-1 flex flex-col">
+              <div className="flex-1 overflow-hidden">
+                <BlockWorkspace 
+                  spriteId={activeWorkspace === 'stage' ? undefined : activeWorkspace}
+                  isStage={activeWorkspace === 'stage'}
+                />
+              </div>
+              <VariableManager currentSpriteId={activeWorkspace === 'stage' ? undefined : activeWorkspace} />
+            </div>
           </>
         ) : viewMode === 'code' ? (
           <div className="flex-1">

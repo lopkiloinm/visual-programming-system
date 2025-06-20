@@ -64,8 +64,8 @@ export const blockCategories: BlockCategory[] = [
             { label: 'condition', side: 'left', type: 'boolean' }
           ],
           outputs: [
-            { label: 'then', side: 'right', type: 'flow' },
-            { label: 'else', side: 'right', type: 'flow' }
+            { label: 'then', side: 'bottom', type: 'flow' },
+            { label: 'else', side: 'bottom', type: 'flow' }
           ]
         }
       },
@@ -82,7 +82,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'condition', side: 'left', type: 'boolean' }
           ],
           outputs: [
-            { label: 'do', side: 'right', type: 'flow' }
+            { label: 'do', side: 'bottom', type: 'flow' }
           ]
         }
       },
@@ -94,12 +94,12 @@ export const blockCategories: BlockCategory[] = [
         type: 'action',
         height: 'medium',
         inputs: [
-          { type: 'number', name: 'times', defaultValue: 10 }
+          { type: 'number', name: 'times', defaultValue: 10, acceptsVariables: true }
         ],
         code: 'for (let i = 0; i < ${times}; i++) {\n  ${do}\n}',
         labeledConnections: {
           outputs: [
-            { label: 'do', side: 'right', type: 'flow' }
+            { label: 'do', side: 'bottom', type: 'flow' }
           ]
         }
       },
@@ -213,8 +213,8 @@ export const blockCategories: BlockCategory[] = [
         color: '#2563eb',
         type: 'action',
         inputs: [
-          { type: 'number', name: 'x', defaultValue: 10 },
-          { type: 'number', name: 'y', defaultValue: 10 }
+          { type: 'number', name: 'x', defaultValue: 10, acceptsVariables: true },
+          { type: 'number', name: 'y', defaultValue: 10, acceptsVariables: true }
         ],
         code: 'updateSprite(sprites[0].id, {x: sprites[0].x + ${x}, y: sprites[0].y + ${y}});'
       },
@@ -225,8 +225,8 @@ export const blockCategories: BlockCategory[] = [
         color: '#2563eb',
         type: 'action',
         inputs: [
-          { type: 'number', name: 'x', defaultValue: 0 },
-          { type: 'number', name: 'y', defaultValue: 0 }
+          { type: 'number', name: 'x', defaultValue: 0, acceptsVariables: true },
+          { type: 'number', name: 'y', defaultValue: 0, acceptsVariables: true }
         ],
         code: 'updateSprite(sprites[0].id, {x: ${x}, y: ${y}});'
       },
@@ -314,6 +314,22 @@ export const blockCategories: BlockCategory[] = [
           { type: 'number', name: 'angle', defaultValue: 45 }
         ],
         code: 'updateSprite(sprites[0].id, {rotation: (sprites[0].rotation || 0) + ${angle}});'
+      },
+      {
+        id: 'set_sprite_rotation',
+        label: 'set sprite rotation',
+        category: 'Motion',
+        color: '#2563eb',
+        type: 'action',
+        inputs: [
+          { type: 'number', name: 'angle', defaultValue: 0, acceptsVariables: true }
+        ],
+        code: 'updateSprite(sprites[0].id, {rotation: ${angle}});',
+        labeledConnections: {
+          inputs: [
+            { label: 'angle', side: 'left', type: 'number' }
+          ]
+        }
       },
       {
         id: 'point_towards_mouse',
@@ -416,7 +432,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'sprites[0].mouse.hovering()',
         labeledConnections: {
           outputs: [
-            { label: 'touching', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -429,7 +445,7 @@ export const blockCategories: BlockCategory[] = [
         code: '(window.globalMouseX || 0)',
         labeledConnections: {
           outputs: [
-            { label: 'x', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -442,7 +458,7 @@ export const blockCategories: BlockCategory[] = [
         code: '(window.globalMouseY || 0)',
         labeledConnections: {
           outputs: [
-            { label: 'y', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -455,7 +471,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'sprites[0].x',
         labeledConnections: {
           outputs: [
-            { label: 'x', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -468,7 +484,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'sprites[0].y',
         labeledConnections: {
           outputs: [
-            { label: 'y', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -481,7 +497,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'dist(sprites[0].x, sprites[0].y, (window.globalMouseX || 0), (window.globalMouseY || 0))',
         labeledConnections: {
           outputs: [
-            { label: 'distance', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -494,7 +510,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'sprites[0].speed',
         labeledConnections: {
           outputs: [
-            { label: 'speed', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -510,7 +526,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'kb.pressing("${key}")',
         labeledConnections: {
           outputs: [
-            { label: 'pressed', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       }
@@ -592,7 +608,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'true',
         labeledConnections: {
           outputs: [
-            { label: 'true', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -605,7 +621,7 @@ export const blockCategories: BlockCategory[] = [
         code: 'false',
         labeledConnections: {
           outputs: [
-            { label: 'false', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -623,7 +639,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'boolean' }
           ],
           outputs: [
-            { label: 'result', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -641,7 +657,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'boolean' }
           ],
           outputs: [
-            { label: 'result', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -658,7 +674,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'value', side: 'left', type: 'boolean' }
           ],
           outputs: [
-            { label: 'not', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       }
@@ -682,7 +698,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'sum', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -700,7 +716,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'A-B', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -718,7 +734,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'A×B', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -736,7 +752,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'A÷B', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
       },
@@ -754,7 +770,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'A=B', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -772,7 +788,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'A>B', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -790,7 +806,7 @@ export const blockCategories: BlockCategory[] = [
             { label: 'B', side: 'left', type: 'number' }
           ],
           outputs: [
-            { label: 'A<B', side: 'right', type: 'boolean' }
+            { label: 'boolean', side: 'right', type: 'boolean' }
           ]
         }
       },
@@ -806,9 +822,86 @@ export const blockCategories: BlockCategory[] = [
         code: '${value}',
         labeledConnections: {
           outputs: [
-            { label: 'value', side: 'right', type: 'number' }
+            { label: 'number', side: 'right', type: 'number' }
           ]
         }
+      }
+    ]
+  },
+  {
+    name: 'Variables',
+    color: '#e11d48',
+    blocks: [
+      {
+        id: 'set_variable',
+        type: 'action',
+        category: 'Variables',
+        color: '#e74c3c',
+        label: 'set',
+        inputs: [
+          { 
+            type: 'variable', 
+            name: 'variable',
+            variableTypes: ['number', 'text', 'boolean'],
+            variableScope: ['global', 'instance']
+          },
+          { type: 'text', name: 'value', defaultValue: '0', acceptsVariables: true }
+        ],
+        code: '${variableAccess} = ${value};'
+      },
+      {
+        id: 'change_variable',
+        type: 'action',
+        category: 'Variables',
+        color: '#e74c3c',
+        label: 'add to',
+        inputs: [
+          { 
+            type: 'variable', 
+            name: 'variable',
+            variableTypes: ['number'],
+            variableScope: ['global', 'instance']
+          },
+          { type: 'number', name: 'value', defaultValue: 1, acceptsVariables: true }
+        ],
+        code: '${variableAccess} = (${variableAccess} || 0) + (${value});'
+      },
+      {
+        id: 'get_variable',
+        type: 'value',
+        category: 'Variables',
+        color: '#e74c3c',
+        label: 'get',
+        inputs: [
+          { 
+            type: 'variable', 
+            name: 'variable',
+            variableTypes: ['number', 'text', 'boolean'],
+            variableScope: ['global', 'instance']
+          }
+        ],
+        code: '(${variableAccess} || 0)',
+        labeledConnections: {
+          outputs: [
+            { label: 'any', side: 'right', type: 'any' }
+          ]
+        }
+      },
+      {
+        id: 'show_variable',
+        type: 'action',
+        category: 'Variables',
+        color: '#e74c3c',
+        label: 'show variable',
+        inputs: [
+          { 
+            type: 'variable', 
+            name: 'variable',
+            variableTypes: ['number', 'text', 'boolean'],
+            variableScope: ['global', 'instance']
+          }
+        ],
+        code: '// Variable display handled by generator'
       }
     ]
   }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { BlockInstance, FlowConnection } from '../types/blocks';
 import { generateCodeFromBlocks } from '../utils/codeGeneration';
+import { useVariableContext } from './VariableContext';
 
 interface BlockContextType {
   workspaceBlocks: BlockInstance[];
@@ -11,12 +12,13 @@ interface BlockContextType {
   updateBlockPosition: (instanceId: string, position: { x: number; y: number }) => void;
   updateBlockValue: (instanceId: string, inputName: string, value: any) => void;
   updateCode: (code: string) => void;
-  // Flowchart connection methods
+  // Connection methods (handles both flow and data connections)
   addConnection: (connection: FlowConnection) => void;
   removeConnection: (connectionId: string) => void;
   updateConnectionWaitTime: (connectionId: string, waitFrames: number) => void;
   getConnectionsFromBlock: (blockId: string) => FlowConnection[];
   getConnectionsToBlock: (blockId: string) => FlowConnection[];
+  isInputConnected: (blockId: string, inputName: string) => boolean;
   // Import/Export methods
   clearWorkspace: () => Promise<void>;
   importWorkspaceData: (blocks: BlockInstance[], connections: FlowConnection[]) => Promise<void>;
@@ -28,12 +30,34 @@ export const BlockProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [workspaceBlocks, setWorkspaceBlocks] = useState<BlockInstance[]>([]);
   const [connections, setConnections] = useState<FlowConnection[]>([]);
   const [generatedCode, setGeneratedCode] = useState<string>('');
+  const { variables: variableContext } = useVariableContext();
 
   useEffect(() => {
     const generateCode = () => {
       // Get current sprites from global window object
       const sprites = (window as any).sprites || [];
-      const code = generateCodeFromBlocks(workspaceBlocks, sprites, connections);
+      
+      // Convert VariableContext format to code generation format
+      const variables: {
+        global: { [key: string]: any };
+        instance: { [spriteId: string]: { [varName: string]: any } };
+      } = {
+        global: {},
+        instance: {}
+      };
+      
+      variableContext.forEach(variable => {
+        if (variable.scope === 'global') {
+          variables.global[variable.name] = variable.initialValue;
+        } else if (variable.scope === 'instance' && variable.spriteId) {
+          if (!variables.instance[variable.spriteId]) {
+            variables.instance[variable.spriteId] = {};
+          }
+          variables.instance[variable.spriteId][variable.name] = variable.initialValue;
+        }
+      });
+      
+      const code = generateCodeFromBlocks(workspaceBlocks, sprites, connections, variables);
       setGeneratedCode(code);
     };
 
@@ -46,7 +70,7 @@ export const BlockProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       window.removeEventListener('spritesChanged', handleSpritesChanged);
     };
-  }, [workspaceBlocks, connections]);
+  }, [workspaceBlocks, connections, variableContext]);
 
   const addBlockToWorkspace = (block: BlockInstance) => {
     if (block.inputs && !block.values) {
@@ -55,6 +79,8 @@ export const BlockProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         block.values![input.name] = input.defaultValue;
       });
     }
+    // Initialize connected inputs tracking
+    block.connectedInputs = new Set();
     setWorkspaceBlocks(prev => [...prev, block]);
   };
 
@@ -101,10 +127,52 @@ export const BlockProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Flowchart connection methods
   const addConnection = (connection: FlowConnection) => {
     setConnections(prev => [...prev, connection]);
+    
+    // If this is a data connection (has targetInputName), clear the input value
+    if (connection.targetInputName) {
+      setWorkspaceBlocks(prevBlocks =>
+        prevBlocks.map(block =>
+          block.instanceId === connection.targetBlockId
+            ? {
+                ...block,
+                values: {
+                  ...block.values,
+                  [connection.targetInputName!]: '' // Clear the input value
+                }
+              }
+            : block
+        )
+      );
+    }
   };
 
   const removeConnection = (connectionId: string) => {
+    // Find the connection before removing it to restore input value
+    const connectionToRemove = connections.find(conn => conn.id === connectionId);
+    
     setConnections(prev => prev.filter(conn => conn.id !== connectionId));
+    
+    // If this was a data connection (has targetInputName), restore default value
+    if (connectionToRemove && connectionToRemove.targetInputName) {
+      setWorkspaceBlocks(prevBlocks =>
+        prevBlocks.map(block => {
+          if (block.instanceId === connectionToRemove.targetBlockId) {
+            // Find the input definition to get its default value
+            const inputDef = block.inputs?.find(input => input.name === connectionToRemove.targetInputName);
+            const defaultValue = inputDef?.defaultValue ?? '';
+            
+            return {
+              ...block,
+              values: {
+                ...block.values,
+                [connectionToRemove.targetInputName!]: defaultValue
+              }
+            };
+          }
+          return block;
+        })
+      );
+    }
   };
 
   const updateConnectionWaitTime = (connectionId: string, waitFrames: number) => {
@@ -121,6 +189,13 @@ export const BlockProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getConnectionsToBlock = (blockId: string): FlowConnection[] => {
     return connections.filter(conn => conn.targetBlockId === blockId);
+  };
+
+  const isInputConnected = (blockId: string, inputName: string): boolean => {
+    // Check if there's a connection to this specific input
+    return connections.some(conn => 
+      conn.targetBlockId === blockId && conn.targetInputName === inputName
+    );
   };
 
   // Import/Export methods
@@ -176,6 +251,7 @@ export const BlockProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       updateConnectionWaitTime,
       getConnectionsFromBlock,
       getConnectionsToBlock,
+      isInputConnected,
       clearWorkspace,
       importWorkspaceData
     }}>
