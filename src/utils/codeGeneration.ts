@@ -1,4 +1,5 @@
 import { BlockInstance, FlowConnection } from '../types/blocks';
+import { VariableDefinition } from '../types/blocks';
 
 // Block dimensions - must match BlockWorkspace constants
 const BASE_BLOCK_HEIGHT = 36;
@@ -10,8 +11,6 @@ const getBlockHeight = (block: BlockInstance) => {
   const hasInputs = block.inputs && block.inputs.length > 0;
   return BASE_BLOCK_HEIGHT + (hasInputs ? INPUT_HEIGHT_ADDITION : 0);
 };
-
-
 
 // Helper to check if a block is a drawing block
 const isDrawingBlock = (blockId: string): boolean => {
@@ -48,6 +47,7 @@ const applySpriteContextReplacement = (block: BlockInstance, code: string, sprit
     } else if (code.includes('sprites[0]')) {
       return code.replace(/sprites\[0\][^;]*;/g, '// Sprite reference removed for stage workspace;');
     }
+    
     return code;
   } else if (block.workspaceType === 'sprite' && block.spriteId) {
     const spriteIndex = spriteIndexMap.get(block.spriteId);
@@ -79,7 +79,7 @@ const applySpriteContextReplacement = (block: BlockInstance, code: string, sprit
 };
 
 // Async flowchart-based code generation with edge timing
-export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] = [], connections: FlowConnection[] = []): string => {
+export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] = [], connections: FlowConnection[] = [], variables: any = { global: {}, instance: {} }): string => {
   let setupEventCode = '';
   let drawEventCode = '';
   let asyncFunctions = '';
@@ -92,19 +92,34 @@ export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] =
     spriteIndexMap.set(sprite.id, index);
   });
   
+  // Populate dataInputConnections on blocks from connections array with targetInputName
+  const blocksWithDataConnections = blocks.map(block => {
+    const blockDataConnections: Record<string, string> = {};
+    connections.forEach(conn => {
+      if (conn.targetBlockId === block.instanceId && conn.targetInputName) {
+        blockDataConnections[conn.targetInputName] = conn.sourceBlockId;
+      }
+    });
+    
+    return {
+      ...block,
+      dataInputConnections: Object.keys(blockDataConnections).length > 0 ? blockDataConnections : block.dataInputConnections
+    };
+  });
+  
   // Group blocks by workspace and event type
-  const eventBlocks = blocks.filter(block => block.type === 'event');
+  const eventBlocks = blocksWithDataConnections.filter(block => block.type === 'event');
   
   // Process each event block
   eventBlocks.forEach(eventBlock => {
     if (eventBlock.id === 'when_draw') {
       if (eventBlock.workspaceType === 'stage') {
         // Stage events still go in draw loop (background, stage effects, etc.)
-        const flowchainCode = generateFlowchainCode(eventBlock, blocks, connections, spriteIndexMap);
+        const flowchainCode = generateFlowchainCode(eventBlock, blocksWithDataConnections, connections, spriteIndexMap);
         drawEventCode += flowchainCode;
       } else if (eventBlock.workspaceType === 'sprite' && eventBlock.spriteId) {
         // Sprite events become async functions that loop forever
-        const asyncFunction = generateAsyncSpriteFunction(eventBlock, blocks, connections, spriteIndexMap);
+        const asyncFunction = generateAsyncSpriteFunction(eventBlock, blocksWithDataConnections, connections, spriteIndexMap);
         asyncFunctions += asyncFunction + '\n\n';
         
         // Add startup code to launch the async function
@@ -113,29 +128,30 @@ export const generateCodeFromBlocks = (blocks: BlockInstance[], sprites: any[] =
         asyncStartupCode += `  startSpriteFlowchart_${eventBlock.instanceId}();\n\n`;
       }
     } else if (eventBlock.id === 'when_setup') {
-      const flowchainCode = generateFlowchainCode(eventBlock, blocks, connections, spriteIndexMap);
+      const flowchainCode = generateFlowchainCode(eventBlock, blocksWithDataConnections, connections, spriteIndexMap);
       setupEventCode += flowchainCode;
     } else {
       // Other events (click, key press, etc.)
-      const eventFunction = generateEventFunction(eventBlock, blocks, connections, spriteIndexMap);
+      const eventFunction = generateEventFunction(eventBlock, blocksWithDataConnections, connections, spriteIndexMap);
       eventFunctions += eventFunction + '\n\n';
     }
   });
 
   // Generate sprite system
   let spriteVariables = '';
+  let globalSetup = '';
   let spriteSetup = '';
   let utilityFunctions = '';
 
-  if (sprites.length > 0) {
-    spriteVariables = generateSpriteVariables(sprites);
-    spriteSetup = generateSpriteSetup(sprites);
-    utilityFunctions = generateUtilityFunctions();
-  }
+  // ALWAYS generate essential initialization (completely independent of sprites)
+  spriteVariables = generateSpriteVariables(sprites);
+  globalSetup = generateGlobalSetup(variables);
+  spriteSetup = generateSpriteOnlySetup(sprites, variables);
+  utilityFunctions = generateUtilityFunctions();
 
   return `${spriteVariables}${utilityFunctions}function setup() {
-  createCanvas(480, 360);
-${spriteSetup}${setupEventCode}
+${globalSetup}${spriteSetup}  createCanvas(480, 360);
+${setupEventCode}
 ${asyncStartupCode}}
 
 function draw() {
@@ -187,8 +203,6 @@ function generateFlowchainCode(
 
   return code;
 }
-
-
 
 // Find all blocks connected from a starting block
 function findConnectedBlocks(
@@ -268,8 +282,6 @@ function findExecutionStateBlocks(
   return executionStates;
 }
 
-
-
 // Generate code for a chain of blocks (for simple linear execution)
 function generateChainCode(
   currentBlock: BlockInstance,
@@ -320,6 +332,64 @@ function getSafePlaceholder(type: 'boolean' | 'number' | 'flow' | string, label:
   }
 }
 
+// Helper function to process variable references in input values
+function processVariableReferences(value: string, inputDef?: any, spriteId: string | null = null, spriteIndexMap?: Map<string, number>): string {
+  if (typeof value !== 'string') return String(value);
+  
+  // Handle variable references starting with $
+  if (inputDef?.acceptsVariables && typeof value === 'string' && value.startsWith('$')) {
+    const variableRef = value.substring(1); // Remove $ prefix
+    
+    // Parse variable reference (format: "scope:name" or just "name" for global)
+    const parts = variableRef.split(':');
+    const scope = parts.length > 1 ? parts[0] : 'global';
+    const name = parts.length > 1 ? parts[1] : parts[0];
+    
+    if (scope === 'global') {
+      // Direct global variable access
+      return `(variables.${name} || 0)`;
+    } else if (scope === 'instance') {
+      // Direct sprite property access
+      if (spriteId && spriteIndexMap) {
+        const spriteIndex = spriteIndexMap.get(spriteId);
+        if (spriteIndex !== undefined) {
+          return `(sprites[${spriteIndex}].${name} || 0)`;
+        }
+      }
+      // Fallback if no sprite context
+      return '0';
+    } else {
+      // Fallback for unknown scope - treat as global
+      return `(variables.${name} || 0)`;
+    }
+  }
+  
+  return value;
+}
+
+// Helper function to handle dynamic inputs for customizable blocks
+function processDynamicInputs(block: BlockInstance): { args: string; argNames: string } {
+  if (!block.dynamicInputs) {
+    return { args: '', argNames: '' };
+  }
+
+  const argCount = block.values?.argCount || 0;
+  const args: string[] = [];
+  const argNames: string[] = [];
+
+  for (let i = 0; i < argCount; i++) {
+    const argName = `arg${i}`;
+    const argValue = block.values?.[argName] || `arg${i}`;
+    args.push(argValue);
+    argNames.push(argName);
+  }
+
+  return { 
+    args: args.join(', '), 
+    argNames: argNames.join(', ') 
+  };
+}
+
 // Process individual block code with input substitution and labeled connections
 function processBlockCode(
   block: BlockInstance, 
@@ -336,30 +406,9 @@ function processBlockCode(
     if (processingStack.has(block.instanceId)) {
       // Circular reference detected - return simple code without recursion
       console.warn(`Circular reference detected for block ${block.instanceId}, using simple code`);
-      let code = block.code;
-      
-      // Only handle basic input substitution without recursive labeled connections
-      if (block.inputs && block.values) {
-        block.inputs.forEach(input => {
-          const value = block.values![input.name] ?? input.defaultValue;
-          const placeholder = `\${${input.name}}`;
-          
-          if (input.type === 'text') {
-            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
-          } else {
-            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
-          }
-        });
-      }
-      
-      return applySpriteContextReplacement(block, code, spriteIndexMap);
-    }
-    
-    // Add this block to the processing stack
-    processingStack.add(block.instanceId);
     let code = block.code;
     
-    // Replace input placeholders with actual values
+      // Only handle basic input substitution without recursive labeled connections
     if (block.inputs && block.values) {
       block.inputs.forEach(input => {
         const value = block.values![input.name] ?? input.defaultValue;
@@ -371,6 +420,81 @@ function processBlockCode(
           code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(value));
         }
       });
+    }
+    
+      return applySpriteContextReplacement(block, code, spriteIndexMap);
+    }
+    
+    // Add this block to the processing stack
+    processingStack.add(block.instanceId);
+    let code = block.code;
+    
+    // Replace input placeholders with actual values or connected data
+    if (block.inputs && block.values) {
+      block.inputs.forEach(input => {
+        const placeholder = `\${${input.name}}`;
+        
+        // Handle variable input types specially to generate direct property access
+        if (input.type === 'variable') {
+          const variableRef = block.values![input.name];
+          if (variableRef && typeof variableRef === 'object') {
+            const { scope, variableName } = variableRef;
+            let propertyAccess = '';
+            
+            if (scope === 'global') {
+              propertyAccess = `variables.${variableName}`;
+            } else if (scope === 'instance') {
+              const spriteIndex = spriteIndexMap.get(block.spriteId || '');
+              if (spriteIndex !== undefined) {
+                propertyAccess = `sprites[${spriteIndex}].${variableName}`;
+            } else {
+                propertyAccess = 'undefined';
+              }
+            }
+            
+            // Replace both ${variable} and ${variableAccess} placeholders
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), `"${scope}:${variableName}"`);
+            code = code.replace(/\$\{variableAccess\}/g, propertyAccess);
+          }
+          return;
+        }
+        
+        // Check if this input has a data connection
+        if (block.dataInputConnections && block.dataInputConnections[input.name] && allBlocks) {
+          const sourceBlockId = block.dataInputConnections[input.name];
+          const sourceBlock = allBlocks.find(b => b.instanceId === sourceBlockId);
+          
+          if (sourceBlock && !processingStack.has(sourceBlock.instanceId)) {
+            // Generate code from connected block
+            const connectedValue = processBlockCode(sourceBlock, spriteIndexMap, allBlocks, connections, processingStack);
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), `(${connectedValue})`);
+          } else {
+            // Fallback to default if connection is broken or circular
+            const rawValue = block.values![input.name] ?? input.defaultValue;
+            const spriteId = block.spriteId || '';
+            const processedValue = processVariableReferences(rawValue, input, spriteId, spriteIndexMap);
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(processedValue));
+          }
+      } else {
+          // No data connection, use normal value
+          const rawValue = block.values![input.name] ?? input.defaultValue;
+          const spriteId = block.spriteId || '';
+          const processedValue = processVariableReferences(rawValue, input, spriteId, spriteIndexMap);
+          
+          if (input.type === 'text' && !input.acceptsVariables) {
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), processedValue);
+                  } else {
+            code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), String(processedValue));
+          }
+                  }
+                });
+              }
+              
+    // Handle dynamic inputs for customizable blocks
+    if (block.dynamicInputs) {
+      const { args, argNames } = processDynamicInputs(block);
+      code = code.replace(/\$\{args\}/g, args);
+      code = code.replace(/\$\{argNames\}/g, argNames);
     }
     
     // Handle labeled connections if we have the necessary data
@@ -393,12 +517,12 @@ function processBlockCode(
               if (sourceBlock && !processingStack.has(sourceBlock.instanceId)) {
                 const sourceCode = processBlockCode(sourceBlock, spriteIndexMap, allBlocks, connections, processingStack);
                 code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), sourceCode);
-              } else {
+          } else {
                 // Source block is being processed or doesn't exist, use safe placeholder
                 const safeValue = getSafePlaceholder(input.type, input.label);
                 code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
               }
-            } else {
+                  } else {
               // No connection, use safe placeholder based on type
               const safeValue = getSafePlaceholder(input.type, input.label);
               code = code.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), safeValue);
@@ -575,7 +699,7 @@ function buildLinearSequence(
   return sequence;
 }
 
-// Generate utility functions for frame waiting
+// Generate utility functions for frame waiting - no variable abstractions
 function generateUtilityFunctions(): string {
   return `// Frame waiting utility for async functions
 function waitFrames(frames) {
@@ -629,6 +753,9 @@ let mouseY = 0;
 
 // Drawing buffer for async-to-sync drawing coordination
 let drawingBuffer = [];
+
+// User-defined variables storage (initialized in setup)
+let variables;
 
 // p5play sprites array - automatically managed by p5play
 let sprites = [`;
@@ -738,32 +865,77 @@ function executeDrawBuffer() {
   return code;
 }
     
-    // Generate sprite setup code
-function generateSpriteSetup(sprites: any[]): string {
-  let code = '  // Initialize q5.js + p5play sprite system\n';
+
+    
+// Generate global setup code (completely independent of sprites)
+function generateGlobalSetup(variables: any): string {
+  let code = '';
+  
+  // ALWAYS initialize variables - regardless of sprite count
+  code += '  // Initialize variables storage\n';
+  code += '  variables = {};\n';
+  code += '\n';
+  
+  // ALWAYS initialize global variables from variable panel - regardless of sprite count
+  if (variables.global && Object.keys(variables.global).length > 0) {
+    code += '  // Initialize global variables from variable panel\n';
+    Object.entries(variables.global).forEach(([varName, value]) => {
+      const valueStr = typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+      code += `  variables.${varName} = ${valueStr};\n`;
+    });
+    code += '\n';
+  }
+  
+  // ALWAYS initialize basic system - regardless of sprite count  
+  code += '  // Initialize q5.js + p5play sprite system\n';
   code += '  // Disable gravity by default (can be enabled via blocks)\n';
   code += '  if (typeof world !== "undefined") world.gravity.y = 0;\n\n';
 
-    sprites.forEach((sprite, index) => {
-    code += `  // Initialize ${sprite.name} with p5play integration\n`;
-    code += `  sprites[${index}].p5playSprite = new Sprite();\n`;
-    code += `  sprites[${index}].p5playSprite.x = ${sprite.x};\n`;
-    code += `  sprites[${index}].p5playSprite.y = ${sprite.y};\n`;
-    code += `  sprites[${index}].p5playSprite.w = ${sprite.size || 30};\n`;
-    code += `  sprites[${index}].p5playSprite.h = ${sprite.size || 30};\n`;
-    code += `  sprites[${index}].p5playSprite.color = "${sprite.color || '#ff6b6b'}";\n`;
-    code += `  sprites[${index}].p5playSprite.visible = ${sprite.visible !== false};\n`;
-    code += `  sprites[${index}].p5playSprite.collider = 'none'; // Disable physics by default\n`;
-    code += `  sprites[${index}].p5playSprite.spriteId = "${sprite.id}";\n\n`;
-  });
+  return code;
+}
 
-  code += '  // Sync sprite data with p5play sprites\n';
-  code += '  sprites.forEach((sprite, index) => {\n';
-  code += '    if (sprite.p5playSprite) {\n';
-  code += '      sprite.x = sprite.p5playSprite.x;\n';
-  code += '      sprite.y = sprite.p5playSprite.y;\n';
-  code += '    }\n';
-  code += '  });\n\n';
+// Generate ONLY sprite-specific setup code (when sprites exist)
+function generateSpriteOnlySetup(sprites: any[], variables: any): string {
+  let code = '';
+  
+  // ONLY do sprite-specific initialization if sprites exist
+  if (sprites.length > 0) {
+    code += '  // Initialize sprites with p5play integration\n';
+    sprites.forEach((sprite, index) => {
+      code += `  // Initialize ${sprite.name} with p5play integration\n`;
+      code += `  sprites[${index}].p5playSprite = new Sprite();\n`;
+      code += `  sprites[${index}].p5playSprite.x = ${sprite.x};\n`;
+      code += `  sprites[${index}].p5playSprite.y = ${sprite.y};\n`;
+      code += `  sprites[${index}].p5playSprite.w = ${sprite.size || 30};\n`;
+      code += `  sprites[${index}].p5playSprite.h = ${sprite.size || 30};\n`;
+      code += `  sprites[${index}].p5playSprite.color = "${sprite.color || '#ff6b6b'}";\n`;
+      code += `  sprites[${index}].p5playSprite.visible = ${sprite.visible !== false};\n`;
+      code += `  sprites[${index}].p5playSprite.collider = 'none'; // Disable physics by default\n`;
+      code += `  sprites[${index}].p5playSprite.spriteId = "${sprite.id}";\n`;
+      
+      // Initialize instance variables as direct properties on the sprite object (from variable panel)
+      if (variables.instance && variables.instance[sprite.id]) {
+        const instanceVars = variables.instance[sprite.id];
+        const varNames = Object.keys(instanceVars);
+        if (varNames.length > 0) {
+          Object.entries(instanceVars).forEach(([varName, value]) => {
+            const valueStr = typeof value === 'string' ? `"${value}"` : JSON.stringify(value);
+            code += `  sprites[${index}].${varName} = ${valueStr};\n`;
+          });
+        }
+      }
+      
+      code += '\n';
+    });
+
+    code += '  // Sync sprite data with p5play sprites\n';
+    code += '  sprites.forEach((sprite, index) => {\n';
+    code += '    if (sprite.p5playSprite) {\n';
+    code += '      sprite.x = sprite.p5playSprite.x;\n';
+    code += '      sprite.y = sprite.p5playSprite.y;\n';
+    code += '    }\n';
+    code += '  });\n\n';
+  }
 
   return code;
 }

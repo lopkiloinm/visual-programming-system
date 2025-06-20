@@ -371,7 +371,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     if (q5Instance.current) {
       q5Instance.current.remove();
     }
-
+    
     // Log library verification to debug log
     addDebugLog(0, '📦 Libraries loaded: q5 v3.1.4, p5play v3.30.1, planck v1.4.2', 'info');
 

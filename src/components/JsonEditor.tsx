@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Download, Upload, Save, FileJson, AlertCircle, CheckCircle, Copy } from 'lucide-react';
 import { useBlockContext } from '../contexts/BlockContext';
 import { useSpriteContext } from '../contexts/SpriteContext';
+import { useVariableContext } from '../contexts/VariableContext';
 
 interface WorkspaceData {
   version: string;
@@ -9,10 +10,12 @@ interface WorkspaceData {
   workspaceBlocks: any[];
   connections: any[];
   sprites: any[];
+  variables: any[];
   metadata: {
     totalBlocks: number;
     totalConnections: number;
     totalSprites: number;
+    totalVariables: number;
     workspaceTypes: string[];
   };
 }
@@ -20,6 +23,7 @@ interface WorkspaceData {
 export const JsonEditor: React.FC = () => {
   const { workspaceBlocks, connections, clearWorkspace, importWorkspaceData } = useBlockContext();
   const { sprites, clearSprites, importSprites } = useSpriteContext();
+  const { variables, clearVariables, importVariables } = useVariableContext();
   const [jsonText, setJsonText] = useState('');
   const [status, setStatus] = useState<{type: 'success' | 'error' | 'info' | null, message: string}>({type: null, message: ''});
   const [isLoading, setIsLoading] = useState(false);
@@ -38,10 +42,12 @@ export const JsonEditor: React.FC = () => {
       workspaceBlocks,
       connections,
       sprites,
+      variables,
       metadata: {
         totalBlocks: workspaceBlocks.length,
         totalConnections: connections.length,
         totalSprites: sprites.length,
+        totalVariables: variables.length,
         workspaceTypes
       }
     };
@@ -53,7 +59,7 @@ export const JsonEditor: React.FC = () => {
       const data = generateCurrentJson();
       const jsonString = JSON.stringify(data, null, 2);
       setJsonText(jsonString);
-      setStatus({type: 'success', message: `Exported ${data.metadata.totalBlocks} blocks, ${data.metadata.totalConnections} connections, and ${data.metadata.totalSprites} sprites`});
+      setStatus({type: 'success', message: `Exported ${data.metadata.totalBlocks} blocks, ${data.metadata.totalConnections} connections, ${data.metadata.totalSprites} sprites, and ${data.metadata.totalVariables} variables`});
     } catch (error) {
       setStatus({type: 'error', message: `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`});
     }
@@ -99,10 +105,14 @@ export const JsonEditor: React.FC = () => {
       if (!data.sprites || !Array.isArray(data.sprites)) {
         throw new Error('Invalid JSON: sprites must be an array');
       }
+      
+      // Variables are optional for backwards compatibility
+      const variablesToImport = data.variables && Array.isArray(data.variables) ? data.variables : [];
 
       // Clear existing data
       await clearWorkspace();
       await clearSprites();
+      await clearVariables();
 
       // Import new data
       if (data.sprites.length > 0) {
@@ -113,9 +123,13 @@ export const JsonEditor: React.FC = () => {
         await importWorkspaceData(data.workspaceBlocks, data.connections);
       }
 
+      if (variablesToImport.length > 0) {
+        await importVariables(variablesToImport);
+      }
+
       setStatus({
         type: 'success', 
-        message: `Import successful! Loaded ${data.workspaceBlocks.length} blocks, ${data.connections.length} connections, and ${data.sprites.length} sprites`
+        message: `Import successful! Loaded ${data.workspaceBlocks.length} blocks, ${data.connections.length} connections, ${data.sprites.length} sprites, and ${variablesToImport.length} variables`
       });
     } catch (error) {
       setStatus({
@@ -171,7 +185,7 @@ export const JsonEditor: React.FC = () => {
     if (!jsonText) {
       handleExport();
     }
-  }, [workspaceBlocks.length, connections.length, sprites.length]);
+  }, [workspaceBlocks.length, connections.length, sprites.length, variables.length]);
 
   return (
     <div className="flex flex-col h-full bg-white">

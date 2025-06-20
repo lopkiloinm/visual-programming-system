@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useBlockContext } from '../contexts/BlockContext';
 import { Block } from './Block';
 import { FlowConnection } from '../types/blocks';
+import { blockCategories } from '../utils/blockDefinitions';
 
 interface BlockWorkspaceProps {
   spriteId?: string;
@@ -102,6 +103,14 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
   const workspaceSpecificConnections = connections.filter(conn => {
     const sourceBlock = workspaceBlocks.find(b => b.instanceId === conn.sourceBlockId);
     if (!sourceBlock) return false;
+    if (isStage) return sourceBlock.workspaceType === 'stage';
+    return sourceBlock.workspaceType === 'sprite' && sourceBlock.spriteId === spriteId;
+  });
+
+  // Filter data connections (connections with targetInputName) for this workspace
+  const workspaceSpecificDataConnections = connections.filter(conn => {
+    const sourceBlock = workspaceBlocks.find(b => b.instanceId === conn.sourceBlockId);
+    if (!sourceBlock || !conn.targetInputName) return false;
     if (isStage) return sourceBlock.workspaceType === 'stage';
     return sourceBlock.workspaceType === 'sprite' && sourceBlock.spriteId === spriteId;
   });
@@ -256,23 +265,37 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
         
         // Special positioning for control blocks like if/while  
         if (block.category === 'Control' || block.type === 'control') {
-          // Position outputs on the right side, evenly spaced
-          const rightOutputs = block.labeledConnections.outputs.filter(out => out.side === 'right');
-          const rightIndex = rightOutputs.findIndex(out => out === output);
-          const totalRightOutputs = rightOutputs.length;
-          
-          // For if blocks, evenly space then/else with condition (which is at 25%)
-          let yOffset;
-          if (block.id === 'if_condition' && totalRightOutputs === 2) {
-            yOffset = rightIndex === 0 ? height * 0.5 : height * 0.75; // then at 50%, else at 75%
+          if (output.side === 'bottom') {
+            // Position flow control outputs on the bottom, side by side
+            const bottomOutputs = block.labeledConnections.outputs.filter(out => out.side === 'bottom');
+            const bottomIndex = bottomOutputs.findIndex(out => out === output);
+            const totalBottomOutputs = bottomOutputs.length;
+            
+            // For if blocks with then/else, position them side by side at bottom
+            let xOffset;
+            if (block.id === 'if_condition' && totalBottomOutputs === 2) {
+              xOffset = bottomIndex === 0 ? width * 0.33 : width * 0.67; // then at 33%, else at 67%
+            } else {
+              xOffset = width * (bottomIndex + 1) / (totalBottomOutputs + 1);
+            }
+            
+            return {
+              x: block.position.x + xOffset,
+              y: block.position.y + height // Bottom edge
+            };
           } else {
-            yOffset = height * (rightIndex + 1) / (totalRightOutputs + 1);
+            // Position other outputs on the right side, evenly spaced
+            const rightOutputs = block.labeledConnections.outputs.filter(out => out.side === 'right');
+            const rightIndex = rightOutputs.findIndex(out => out === output);
+            const totalRightOutputs = rightOutputs.length;
+            
+            const yOffset = height * (rightIndex + 1) / (totalRightOutputs + 1);
+            
+            return {
+              x: block.position.x + width, // Right edge
+              y: block.position.y + yOffset
+            };
           }
-          
-          return {
-            x: block.position.x + width, // Right edge
-            y: block.position.y + yOffset
-          };
         } else {
           // Standard positioning for value blocks
           const totalOutputs = block.labeledConnections.outputs.length;
@@ -313,31 +336,75 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
     const { width, height } = getBlockDimensions(blockId);
     
     // For labeled connections, calculate position based on the handle
-    if (block.labeledConnections && handle !== 'input' && handle !== 'top') {
+    if (handle !== 'input' && handle !== 'top') {
       // Handle format is like "input-0", "input-1", etc.
       const handleMatch = handle.match(/^input-(\d+)$/);
-      if (handleMatch && block.labeledConnections.inputs) {
-        const inputIndex = parseInt(handleMatch[1], 10);
-        const input = block.labeledConnections.inputs[inputIndex];
+      if (handleMatch) {
+        // Get all blocks from categories to find labeledConnections
+        const allBlocks = blockCategories.flatMap(category => category.blocks);
+        const blockDefinition = allBlocks.find((b: any) => b.id === block.id);
         
-        // Standard left-side positioning for all inputs
-        const leftInputs = block.labeledConnections.inputs.filter(inp => inp.side === 'left');
-        const leftIndex = leftInputs.findIndex(inp => inp === input);
-        const totalLeftInputs = leftInputs.length;
-        
-        // For control blocks, position condition near the top for logical flow
-        if ((block.category === 'Control' || block.type === 'control') && input.type === 'boolean') {
-          return {
-            x: block.position.x, // Left edge
-            y: block.position.y + (height * 0.25) // Near the top (25% down)
-          };
-        } else {
-          // Standard spacing for data inputs
-          const yPosition = block.position.y + (height * (leftIndex + 1) / (totalLeftInputs + 1));
-          return {
-            x: block.position.x, // Left edge
-            y: yPosition
-          };
+        if (blockDefinition?.labeledConnections?.inputs) {
+          const inputIndex = parseInt(handleMatch[1], 10);
+          const input = blockDefinition.labeledConnections.inputs[inputIndex];
+          
+          if (input) {
+            // Handle different sides for labeled inputs
+            if (input.side === 'left') {
+              // Standard left-side positioning for all inputs
+              const leftInputs = blockDefinition.labeledConnections.inputs.filter((inp: any) => inp.side === 'left');
+              const leftIndex = leftInputs.findIndex((inp: any) => inp === input);
+              const totalLeftInputs = leftInputs.length;
+              
+              // For control blocks, position condition near the top for logical flow
+              if ((block.category === 'Control' || block.type === 'control') && input.type === 'boolean') {
+                return {
+                  x: block.position.x, // Left edge
+                  y: block.position.y + (height * 0.25) // Near the top (25% down)
+                };
+              } else {
+                // Standard spacing for data inputs
+                const yPosition = block.position.y + (height * (leftIndex + 1) / (totalLeftInputs + 1));
+                return {
+                  x: block.position.x, // Left edge
+                  y: yPosition
+                };
+              }
+            } else if (input.side === 'right') {
+              // Right-side inputs
+              const rightInputs = blockDefinition.labeledConnections.inputs.filter((inp: any) => inp.side === 'right');
+              const rightIndex = rightInputs.findIndex((inp: any) => inp === input);
+              const totalRightInputs = rightInputs.length;
+              
+              const yPosition = block.position.y + (height * (rightIndex + 1) / (totalRightInputs + 1));
+              return {
+                x: block.position.x + width, // Right edge
+                y: yPosition
+              };
+            } else if (input.side === 'top') {
+              // Top-side inputs
+              const topInputs = blockDefinition.labeledConnections.inputs.filter((inp: any) => inp.side === 'top');
+              const topIndex = topInputs.findIndex((inp: any) => inp === input);
+              const totalTopInputs = topInputs.length;
+              
+              const xPosition = block.position.x + (width * (topIndex + 1) / (totalTopInputs + 1));
+              return {
+                x: xPosition,
+                y: block.position.y // Top edge
+              };
+            } else if (input.side === 'bottom') {
+              // Bottom-side inputs
+              const bottomInputs = blockDefinition.labeledConnections.inputs.filter((inp: any) => inp.side === 'bottom');
+              const bottomIndex = bottomInputs.findIndex((inp: any) => inp === input);
+              const totalBottomInputs = bottomInputs.length;
+              
+              const xPosition = block.position.x + (width * (bottomIndex + 1) / (totalBottomInputs + 1));
+              return {
+                x: xPosition,
+                y: block.position.y + height // Bottom edge
+              };
+            }
+          }
         }
       }
     }
@@ -388,6 +455,22 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
       }
       
       addBlockToWorkspace(newBlock);
+      
+      // Force immediate automatic endpoint calculation on drop
+      setTimeout(() => {
+        forceRefreshConnections();
+      }, 0);
+      
+      // Additional forced measurements with different timing strategies for robustness
+      setTimeout(() => forceRefreshConnections(), 1);
+      setTimeout(() => forceRefreshConnections(), 5);
+      setTimeout(() => forceRefreshConnections(), 16);
+      
+      // Request animation frame for post-paint measurement
+      requestAnimationFrame(() => {
+        forceRefreshConnections();
+        setTimeout(() => forceRefreshConnections(), 0);
+      });
     } catch (error) {
       console.error('Error dropping block:', error);
     }
@@ -434,8 +517,15 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
     e.preventDefault();
     e.stopPropagation();
     
+    console.log(`Starting connection from ${blockId} handle ${handle}`);
     setIsConnecting(true);
     setConnectionStart({ blockId, handle });
+    
+    // Make connection state globally available for orange input dots
+    if (typeof window !== 'undefined') {
+      (window as any).isConnecting = true;
+      console.log(`Set global isConnecting = true`);
+    }
     
     // Start from the specified handle position in workspace coordinates
     const outputPos = getOutputPosition(blockId, handle);
@@ -459,36 +549,201 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
     }
   };
 
-  const handleInputMouseUp = (targetBlockId: string, handle: 'input' | 'top', e: React.MouseEvent) => {
+  const handleInputMouseUp = (targetBlockId: string, handle: 'input' | 'top' | string, e: React.MouseEvent) => {
     if (isConnecting && connectionStart) {
       e.preventDefault();
       e.stopPropagation();
       
-      // Enforce directional rules: down→top, right→left
+      console.log(`handleInputMouseUp called: source=${connectionStart.blockId}:${connectionStart.handle} → target=${targetBlockId}:${handle}`);
+      
+      // STRICT RULES - NO AMBIGUITY:
+      // 1. bottom → top ONLY (vertical flow connections)
+      // 2. right → left ONLY (horizontal data connections)
+      
       const sourceHandle = connectionStart.handle;
       const targetHandle = handle;
       
-      // Check if connection direction is valid
-      // Handle both traditional handles and labeled handles
-      const isVerticalConnection = sourceHandle === 'bottom' && targetHandle === 'top';
-      const isHorizontalConnection = 
-        (sourceHandle === 'output' && targetHandle === 'input') ||
-        (sourceHandle.startsWith('output-') && targetHandle.startsWith('input-')) ||
-        (sourceHandle === 'output' && targetHandle.startsWith('input-')) ||
-        (sourceHandle.startsWith('output-') && targetHandle === 'input');
+      // VERTICAL CONNECTIONS: bottom → top (flow control)
+      const isVerticalFlow = sourceHandle === 'bottom' && targetHandle === 'top';
       
-      const isValidConnection = isVerticalConnection || isHorizontalConnection;
+      // HORIZONTAL CONNECTIONS: right → left (data passing)  
+      const isHorizontalData = sourceHandle === 'output' && targetHandle === 'input';
       
-      if (!isValidConnection) {
-        console.warn(`Invalid connection: ${sourceHandle} cannot connect to ${targetHandle}. Use down→top or right→left.`);
+      // LABELED CONNECTIONS: Check if both source and target are labeled handles
+      const isLabeledConnection = sourceHandle.startsWith('output-') && targetHandle.startsWith('input-');
+      
+      // For labeled connections, check the actual connection types
+      let isValidLabeledConnection = false;
+      if (isLabeledConnection) {
+        // Get source and target block definitions to check connection types
+        const allBlocks = blockCategories.flatMap(category => category.blocks);
+        const sourceBlockInstance = workspaceSpecificBlocks.find(b => b.instanceId === connectionStart.blockId);
+        const targetBlockInstance = workspaceSpecificBlocks.find(b => b.instanceId === targetBlockId);
+        
+        if (sourceBlockInstance && targetBlockInstance) {
+          const sourceBlockDef = allBlocks.find((b: any) => b.id === sourceBlockInstance.id);
+          const targetBlockDef = allBlocks.find((b: any) => b.id === targetBlockInstance.id);
+          
+          if (sourceBlockDef?.labeledConnections?.outputs && targetBlockDef?.labeledConnections?.inputs) {
+            const outputIndex = parseInt(sourceHandle.replace('output-', ''), 10);
+            const inputIndex = parseInt(targetHandle.replace('input-', ''), 10);
+            
+            const sourceOutput = sourceBlockDef.labeledConnections.outputs[outputIndex];
+            const targetInput = targetBlockDef.labeledConnections.inputs[inputIndex];
+            
+            if (sourceOutput && targetInput) {
+              // Check type compatibility
+              const isTypeMatch = sourceOutput.type === targetInput.type || 
+                                  sourceOutput.type === 'any' || targetInput.type === 'any';
+              
+              // Check directional compatibility (flow vs data)
+              const isFlowConnection = sourceOutput.type === 'flow' && targetInput.type === 'flow';
+              const isDataConnection = sourceOutput.type !== 'flow' && targetInput.type !== 'flow';
+              
+              isValidLabeledConnection = isTypeMatch && (isFlowConnection || isDataConnection);
+              
+              console.log(`🔍 Labeled connection: ${sourceOutput.type} → ${targetInput.type}, valid: ${isValidLabeledConnection}`);
+            }
+          }
+        }
+      }
+      
+      // DATA CONNECTIONS TO ORANGE DOTS: validate by input type (number/string/boolean)
+      const getTargetInputType = (blockId: string, inputName: string): string | null => {
+    const block = workspaceSpecificBlocks.find(b => b.instanceId === blockId);
+        if (!block?.inputs) return null;
+        const input = block.inputs.find(inp => inp.name === inputName);
+        return input?.type || null;
+      };
+
+      // Get source output type for validation
+      const getSourceOutputType = (blockId: string, outputHandle: string): string | null => {
+        const blockInstance = workspaceSpecificBlocks.find(b => b.instanceId === blockId);
+        if (!blockInstance) {
+          console.log(`❌ Block instance not found: ${blockId}`);
+          return null;
+        }
+        
+        // Get all blocks from categories
+        const allBlocks = blockCategories.flatMap(category => category.blocks);
+        
+        // Get the original block definition which has the labeledConnections
+        const blockDefinition = allBlocks.find((b: any) => b.id === blockInstance.id);
+        console.log(`🔍 Looking for block ${blockInstance.id}, found:`, blockDefinition ? 'YES' : 'NO');
+        console.log(`🔍 Output handle: "${outputHandle}"`);
+        console.log(`🔍 Block has labeledConnections?`, !!blockDefinition?.labeledConnections);
+        console.log(`🔍 Block outputs:`, blockDefinition?.labeledConnections?.outputs);
+        
+        if (!blockDefinition?.labeledConnections?.outputs) {
+          console.log(`❌ No output definitions found for block ${blockInstance.id}`);
+          return null;
+        }
+        
+        if (outputHandle === 'output') {
+          // For basic 'output' handle, find the first non-flow output
+          const output = blockDefinition.labeledConnections.outputs.find((out: any) => out.type !== 'flow');
+          console.log(`✅ Found output type for ${blockInstance.id}.output: ${output?.type}`);
+          return output?.type || null;
+        } else if (outputHandle.startsWith('output-')) {
+          // For labeled outputs like 'output-0', find by index
+          const outputIndexStr = outputHandle.replace('output-', '');
+          const outputIndex = parseInt(outputIndexStr, 10);
+          console.log(`🔍 Looking for output at index: ${outputIndex}`);
+          const output = blockDefinition.labeledConnections.outputs[outputIndex];
+          console.log(`✅ Found output type for ${blockInstance.id}.${outputHandle}: ${output?.type}`);
+          return output?.type || null;
+        }
+        
+        console.log(`❌ No matching output found for ${blockInstance.id}.${outputHandle}`);
+        console.log(`📋 Available outputs:`, blockDefinition.labeledConnections.outputs.map((out: any) => out.label));
+        return null;
+      };
+
+      // Check type compatibility
+      const isTypeCompatible = (sourceType: string | null, targetType: string | null): boolean => {
+        if (!sourceType || !targetType) return false;
+        
+        // 'any' type is compatible with everything
+        if (sourceType === 'any' || targetType === 'any') return true;
+        
+        // Exact type match
+        if (sourceType === targetType) return true;
+        
+        // No other compatibility rules for now
+        return false;
+      };
+      
+      const targetInputType = getTargetInputType(targetBlockId, targetHandle);
+      const sourceOutputType = getSourceOutputType(connectionStart.blockId, sourceHandle);
+      
+      const isDataToOrangeDot = (sourceHandle === 'output' || sourceHandle.startsWith('output-')) && 
+                                targetInputType && 
+                                ['number', 'text', 'boolean'].includes(targetInputType);
+      
+      if (isDataToOrangeDot) {
+        // Validate type compatibility for data connections
+        if (!isTypeCompatible(sourceOutputType, targetInputType)) {
+          console.warn(`❌ TYPE MISMATCH: Cannot connect ${sourceOutputType} output to ${targetInputType} input`);
+          setIsConnecting(false);
+          setConnectionStart(null);
+          setTempConnection(null);
+          return;
+        }
+        console.log(`✅ Valid data connection: ${sourceHandle} (${sourceOutputType}) → ${targetHandle} (${targetInputType})`);
+      }
+      
+      const isValidVertical = isVerticalFlow;
+      const isValidHorizontal = isHorizontalData || isDataToOrangeDot;
+      const isValidLabeled = isValidLabeledConnection;
+      
+      // Check for mixed labeled/traditional flow connections
+      let isMixedFlowConnection = false;
+      
+      // Case 1: Labeled flow output → traditional flow input (e.g., output-0 → top)
+      if (sourceHandle.startsWith('output-') && targetHandle === 'top') {
+        const allBlocks = blockCategories.flatMap(category => category.blocks);
+        const sourceBlockInstance = workspaceSpecificBlocks.find(b => b.instanceId === connectionStart.blockId);
+        if (sourceBlockInstance) {
+          const sourceBlockDef = allBlocks.find((b: any) => b.id === sourceBlockInstance.id);
+          if (sourceBlockDef?.labeledConnections?.outputs) {
+            const outputIndex = parseInt(sourceHandle.replace('output-', ''), 10);
+            const sourceOutput = sourceBlockDef.labeledConnections.outputs[outputIndex];
+            if (sourceOutput?.type === 'flow') {
+              isMixedFlowConnection = true;
+              console.log(`✅ Mixed flow connection: labeled output (${sourceOutput.label}) → traditional top input`);
+            }
+          }
+        }
+      }
+      
+      // Case 2: Traditional flow output → labeled flow input (e.g., bottom → input-0)
+      if (sourceHandle === 'bottom' && targetHandle.startsWith('input-')) {
+        const allBlocks = blockCategories.flatMap(category => category.blocks);
+        const targetBlockInstance = workspaceSpecificBlocks.find(b => b.instanceId === targetBlockId);
+        if (targetBlockInstance) {
+          const targetBlockDef = allBlocks.find((b: any) => b.id === targetBlockInstance.id);
+          if (targetBlockDef?.labeledConnections?.inputs) {
+            const inputIndex = parseInt(targetHandle.replace('input-', ''), 10);
+            const targetInput = targetBlockDef.labeledConnections.inputs[inputIndex];
+            if (targetInput?.type === 'flow') {
+              isMixedFlowConnection = true;
+              console.log(`✅ Mixed flow connection: traditional bottom output → labeled input (${targetInput.label})`);
+            }
+          }
+        }
+      }
+      
+      if (!isValidVertical && !isValidHorizontal && !isValidLabeled && !isMixedFlowConnection) {
+        console.warn(`❌ INVALID CONNECTION: ${sourceHandle} → ${targetHandle}`);
+        console.warn(`  Vertical: ${isValidVertical}, Horizontal: ${isValidHorizontal}, Labeled: ${isValidLabeled}, Mixed: ${isMixedFlowConnection}`);
         setIsConnecting(false);
         setConnectionStart(null);
         setTempConnection(null);
         return;
       }
       
-      // Determine connection type based on handles
-      const connectionType = isVerticalConnection ? 'vertical' : 'horizontal';
+      // Determine connection type - STRICT
+      const connectionType = (isValidVertical || isMixedFlowConnection) ? 'vertical' : 'horizontal';
       
       // Create new connection
       const newConnection: FlowConnection = {
@@ -497,9 +752,13 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
         targetBlockId: targetBlockId,
         waitFrames: 0, // Default to immediate execution
         sourceHandle: sourceHandle,
-        targetHandle: targetHandle,
-        connectionType: connectionType
+        targetHandle: isDataToOrangeDot ? 'input' : targetHandle, // Use 'input' as target handle for orange dots
+        connectionType: connectionType,
+        // Add targetInputName for data connections to orange dots only
+        ...(isDataToOrangeDot ? { targetInputName: handle } : {})
       };
+      
+      console.log(`Creating connection:`, newConnection);
       
       addConnection(newConnection);
     }
@@ -508,16 +767,54 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
     setIsConnecting(false);
     setConnectionStart(null);
     setTempConnection(null);
+    
+    // Clear global connection state
+    if (typeof window !== 'undefined') {
+      (window as any).isConnecting = false;
+      console.log(`Connection completed - cleared global isConnecting = false`);
+    }
   };
 
   const handleWorkspaceMouseUp = () => {
     if (isConnecting) {
+      console.log(`Canceling connection - dropped on empty space`);
       // Cancel connection if not dropped on a valid target
       setIsConnecting(false);
       setConnectionStart(null);
       setTempConnection(null);
+      
+      // Clear global connection state
+      if (typeof window !== 'undefined') {
+        (window as any).isConnecting = false;
+        console.log(`Cleared global isConnecting = false`);
+      }
     }
   };
+
+  // Add event listener for orange input dot connections
+  useEffect(() => {
+    const handleInputConnectionTarget = (e: CustomEvent) => {
+      console.log(`Received inputConnectionTarget event:`, e.detail);
+      if (isConnecting && connectionStart) {
+        console.log(`Processing connection from ${connectionStart.blockId} to ${e.detail.blockId}.${e.detail.inputName}`);
+        const { blockId, inputName, originalEvent } = e.detail;
+        
+        // Handle this as an input connection with the specific input name
+        handleInputMouseUp(blockId, inputName, originalEvent);
+      } else {
+        console.log(`Ignoring event: isConnecting=${isConnecting}, connectionStart=`, connectionStart);
+      }
+    };
+
+    // Listen for custom events from orange input dots
+    document.addEventListener('inputConnectionTarget', handleInputConnectionTarget as EventListener);
+    console.log(`Added inputConnectionTarget event listener`);
+    
+    return () => {
+      document.removeEventListener('inputConnectionTarget', handleInputConnectionTarget as EventListener);
+      console.log(`Removed inputConnectionTarget event listener`);
+    };
+  }, [isConnecting, connectionStart]);
 
   // Handle workspace panning (optimized for performance)
   const handleWorkspaceMouseDown = (e: React.MouseEvent) => {
@@ -633,39 +930,48 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
     };
   };
 
-
-
-  // Generate SVG path for bezier curve (precise and smooth)
-  const generateBezierPath = (x1: number, y1: number, x2: number, y2: number, connectionType?: 'horizontal' | 'vertical') => {
-    // Consistent control offset that scales well at all zoom levels
-    const baseOffset = 80; // Fixed base offset in workspace units
+  // Calculate precise orange dot position using DOM measurements
+  const getOrangeDotPosition = (blockId: string, inputName: string) => {
+    // Find the orange dot element in the DOM
+    const dotSelector = `[data-orange-dot="${blockId}-${inputName}"]`;
+    const dotElement = document.querySelector(dotSelector) as HTMLElement;
     
-    let cp1x, cp1y, cp2x, cp2y;
-    
-    if (connectionType === 'vertical') {
-      // Vertical connections (bottom→top): use vertical control points
-      const dy = y2 - y1;
-      const distance = Math.abs(dy);
-      const controlOffset = Math.max(baseOffset, distance * 0.4);
-      
-      cp1x = x1;
-      cp1y = y1 + controlOffset;
-      cp2x = x2;
-      cp2y = y2 - controlOffset;
-    } else {
-      // Horizontal connections (right→left) or default: use horizontal control points
-      const dx = x2 - x1;
-      const distance = Math.abs(dx);
-      const controlOffset = Math.max(baseOffset, distance * 0.4);
-      
-      cp1x = x1 + controlOffset;
-      cp1y = y1;
-      cp2x = x2 - controlOffset;
-      cp2y = y2;
+    if (!dotElement) {
+      console.warn(`Orange dot not found: ${dotSelector}`);
+      return { x: 0, y: 0 };
     }
+
+    // Get workspace container to calculate relative position
+    const workspaceContainer = workspaceRef.current;
+    if (!workspaceContainer) {
+      console.warn('Workspace container not found');
+      return { x: 0, y: 0 };
+    }
+
+    // Get bounding rects
+    const dotRect = dotElement.getBoundingClientRect();
+    const workspaceRect = workspaceContainer.getBoundingClientRect();
     
-    // Use precise coordinates (no rounding for smooth curves)
-    return `M${x1.toFixed(1)},${y1.toFixed(1)} C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${x2.toFixed(1)},${y2.toFixed(1)}`;
+    // Calculate center of orange dot in viewport coordinates
+    const dotCenterViewportX = dotRect.left + dotRect.width / 2;
+    const dotCenterViewportY = dotRect.top + dotRect.height / 2;
+    
+    // Convert to workspace coordinates (accounting for pan and zoom)
+    const dotCenterWorkspaceX = (dotCenterViewportX - workspaceRect.left - workspaceTransform.x) / workspaceTransform.scale;
+    const dotCenterWorkspaceY = (dotCenterViewportY - workspaceRect.top - workspaceTransform.y) / workspaceTransform.scale;
+    
+    console.log(`DOM-measured orange dot position for ${blockId}.${inputName}: (${dotCenterWorkspaceX.toFixed(1)}, ${dotCenterWorkspaceY.toFixed(1)})`);
+    
+    return {
+      x: dotCenterWorkspaceX,
+      y: dotCenterWorkspaceY
+    };
+  };
+
+  // Generate SVG path for straight line (clean and doesn't obscure text)
+  const generateStraightPath = (x1: number, y1: number, x2: number, y2: number) => {
+    // Simple straight line from start to end
+    return `M${x1.toFixed(1)},${y1.toFixed(1)} L${x2.toFixed(1)},${y2.toFixed(1)}`;
   };
 
   // Handle connection wait time editing
@@ -683,7 +989,7 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
   return (
     <div 
       ref={workspaceRef}
-      className={`flex-1 bg-white overflow-hidden relative min-h-96 ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`flex-1 overflow-hidden relative h-full ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onMouseDown={handleWorkspaceMouseDown}
@@ -787,12 +1093,15 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
 
            return (
              <>
-               {/* Render connections */}
+               {/* Render flow connections (exclude data connections with targetInputName) */}
                {connectionData.map(({ connection, startPos, endPos }) => {
+                 // Skip data connections - they're rendered separately
+                 if (connection.targetInputName) return null;
+                 
                  // Skip rendering if positions are invalid
                  if (!startPos.x && !startPos.y && !endPos.x && !endPos.y) return null;
                  
-                 const pathData = generateBezierPath(startPos.x, startPos.y, endPos.x, endPos.y, connection.connectionType);
+                 const pathData = generateStraightPath(startPos.x, startPos.y, endPos.x, endPos.y);
                  const strokeColor = connection.waitFrames === 0 ? "#3b82f6" : "#f59e0b";
                  const strokeWidth = 2;
                  
@@ -825,19 +1134,100 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                        </text>
                      )}
                      
-                     {/* Arrow head */}
+                     {/* Arrow head - calculated based on actual line angle */}
                      <polygon
                        points={(() => {
-                         // Generate arrow points based on connection direction
-                         if (connection.connectionType === 'vertical') {
-                           // Vertical arrow pointing down (for bottom→top flow, arrow points at target)
-                           return `${endPos.x-5},${endPos.y-10} ${endPos.x},${endPos.y} ${endPos.x+5},${endPos.y-10}`;
-                         } else {
-                           // Horizontal arrow pointing left (for right→left flow, arrow points at target)  
-                           return `${endPos.x-10},${endPos.y-5} ${endPos.x},${endPos.y} ${endPos.x-10},${endPos.y+5}`;
-                         }
+                         // Calculate the angle of the line
+                         const dx = endPos.x - startPos.x;
+                         const dy = endPos.y - startPos.y;
+                         const angle = Math.atan2(dy, dx);
+                         
+                         // Arrow size
+                         const arrowLength = 10;
+                         const arrowWidth = 5;
+                         
+                         // Calculate arrow points relative to line direction
+                         const tipX = endPos.x;
+                         const tipY = endPos.y;
+                         
+                         // Back points of arrow (perpendicular to line direction)
+                         const backX = tipX - arrowLength * Math.cos(angle);
+                         const backY = tipY - arrowLength * Math.sin(angle);
+                         
+                         // Wings of arrow (perpendicular to line)
+                         const wing1X = backX - arrowWidth * Math.cos(angle + Math.PI/2);
+                         const wing1Y = backY - arrowWidth * Math.sin(angle + Math.PI/2);
+                         const wing2X = backX - arrowWidth * Math.cos(angle - Math.PI/2);
+                         const wing2Y = backY - arrowWidth * Math.sin(angle - Math.PI/2);
+                         
+                         return `${tipX},${tipY} ${wing1X},${wing1Y} ${wing2X},${wing2Y}`;
                        })()}
                        fill={strokeColor}
+                     />
+                   </g>
+                 );
+               })}
+
+               {/* Render data connections (connections with targetInputName) */}
+               {connectionData.filter(({ connection }) => connection.targetInputName).map(({ connection: dataConnection }) => {
+                 const sourceBlock = workspaceSpecificBlocks.find(b => b.instanceId === dataConnection.sourceBlockId);
+                 const targetBlock = workspaceSpecificBlocks.find(b => b.instanceId === dataConnection.targetBlockId);
+                 
+                 if (!sourceBlock || !targetBlock) return null;
+                 
+                 // Get source output position  
+                 const dataStartPos = getOutputPosition(dataConnection.sourceBlockId, dataConnection.sourceHandle);
+                 
+                 // Get precise orange dot position for the target input
+                 const endPos = getOrangeDotPosition(dataConnection.targetBlockId, dataConnection.targetInputName!);
+                 
+                 // Skip if invalid positions
+                 if (!dataStartPos.x && !dataStartPos.y && !endPos.x && !endPos.y) return null;
+                 
+                 // Always straight line for data connections (right to left)
+                 const pathData = generateStraightPath(dataStartPos.x, dataStartPos.y, endPos.x, endPos.y);
+                 
+                 return (
+                   <g key={dataConnection.id}>
+                     {/* Data connection line - orange */}
+                     <path
+                       d={pathData}
+                       stroke="#f97316"
+                       strokeWidth={2}
+                       fill="none"
+                       className="pointer-events-auto cursor-pointer hover:opacity-80 transition-opacity"
+                       onClick={() => removeConnection(dataConnection.id)}
+                     />
+                     
+                     {/* Arrow head - calculated based on actual line angle */}
+                     <polygon
+                       points={(() => {
+                         // Calculate the angle of the data connection line
+                         const dx = endPos.x - dataStartPos.x;
+                         const dy = endPos.y - dataStartPos.y;
+                         const angle = Math.atan2(dy, dx);
+                         
+                         // Arrow size
+                         const arrowLength = 8;
+                         const arrowWidth = 4;
+                         
+                         // Calculate arrow points relative to line direction
+                         const tipX = endPos.x;
+                         const tipY = endPos.y;
+                         
+                         // Back points of arrow (perpendicular to line direction)
+                         const backX = tipX - arrowLength * Math.cos(angle);
+                         const backY = tipY - arrowLength * Math.sin(angle);
+                         
+                         // Wings of arrow (perpendicular to line)
+                         const wing1X = backX - arrowWidth * Math.cos(angle + Math.PI/2);
+                         const wing1Y = backY - arrowWidth * Math.sin(angle + Math.PI/2);
+                         const wing2X = backX - arrowWidth * Math.cos(angle - Math.PI/2);
+                         const wing2Y = backY - arrowWidth * Math.sin(angle - Math.PI/2);
+                         
+                         return `${tipX},${tipY} ${wing1X},${wing1Y} ${wing2X},${wing2Y}`;
+                       })()}
+                       fill="#f97316"
                      />
                    </g>
                  );
@@ -858,7 +1248,7 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                    return (
                      <g key={`handles-${block.instanceId}`}>
                                                {/* Labeled input handles */}
-                        {block.labeledConnections.inputs?.map((input: {label: string, side: 'left' | 'right', type: 'boolean' | 'number' | 'flow'}, index: number) => {
+                        {block.labeledConnections.inputs?.map((input: {label: string, side: 'left' | 'right' | 'top' | 'bottom', type: 'boolean' | 'number' | 'flow'}, index: number) => {
                           const handleId = `input-${index}`;
                           const pos = getInputPosition(block.instanceId, handleId);
                           
@@ -881,9 +1271,15 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                               />
                               {/* Input label - position based on side */}
                               <text
-                                x={input.side === 'right' ? pos.x + handleRadius + 5 : pos.x - handleRadius - 5}
-                                y={pos.y + 2}
-                                textAnchor={input.side === 'right' ? "start" : "end"}
+                                x={input.side === 'left' ? pos.x - handleRadius - 5 : 
+                                   input.side === 'right' ? pos.x + handleRadius + 5 : 
+                                   pos.x}
+                                y={input.side === 'bottom' ? pos.y + handleRadius + 15 : 
+                                   input.side === 'top' ? pos.y - handleRadius - 5 : 
+                                   pos.y + 2}
+                                textAnchor={input.side === 'left' ? "end" : 
+                                           input.side === 'right' ? "start" : 
+                                           "middle"}
                                 fill={handleColor}
                                 fontSize={labelFontSize}
                                 fontWeight="bold"
@@ -896,7 +1292,7 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                         })}
                         
                         {/* Labeled output handles */}
-                        {block.labeledConnections.outputs?.map((output: {label: string, side: 'left' | 'right', type: 'boolean' | 'number' | 'flow'}, index: number) => {
+                        {block.labeledConnections.outputs?.map((output: {label: string, side: 'left' | 'right' | 'top' | 'bottom', type: 'boolean' | 'number' | 'flow'}, index: number) => {
                           const handleId = `output-${index}`;
                           const pos = getOutputPosition(block.instanceId, handleId);
                           
@@ -919,9 +1315,15 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                               />
                               {/* Output label - position based on side */}
                               <text
-                                x={output.side === 'left' ? pos.x - handleRadius - 5 : pos.x + handleRadius + 5}
-                                y={pos.y + 2}
-                                textAnchor={output.side === 'left' ? "end" : "start"}
+                                x={output.side === 'left' ? pos.x - handleRadius - 5 : 
+                                   output.side === 'right' ? pos.x + handleRadius + 5 : 
+                                   pos.x}
+                                y={output.side === 'bottom' ? pos.y + handleRadius + 15 : 
+                                   output.side === 'top' ? pos.y - handleRadius - 5 : 
+                                   pos.y + 2}
+                                textAnchor={output.side === 'left' ? "end" : 
+                                           output.side === 'right' ? "start" : 
+                                           "middle"}
                                 fill={handleColor}
                                 fontSize={labelFontSize}
                                 fontWeight="bold"
@@ -933,7 +1335,7 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                           );
                         })}
                        
-                       {/* Always add top and bottom for vertical flow */}
+                       {/* Always add top and bottom for vertical flow (bottom → top) */}
                        {topPos && (
                          <circle
                            cx={topPos.x}
@@ -967,74 +1369,42 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                      </g>
                    );
                  } else {
-                   // Fallback to traditional 4-point handles for blocks without labeled connections
+                   // STRICT TRADITIONAL HANDLES - NO AMBIGUITY
+                   // ONLY bottom → top for flow control
+                   // Data connections use orange dots on Block component
                    return (
                      <g key={`handles-${block.instanceId}`}>
-                       {/* Left input handle */}
-                       {hasInput && leftPos && (
-                         <circle
-                           cx={leftPos.x}
-                           cy={leftPos.y}
-                           r={handleRadius}
-                           fill="#10b981"
-                           stroke="white"
-                           strokeWidth={Math.max(0.5, 1 / effectiveScale)}
-                           className="cursor-pointer hover:fill-emerald-600 transition-colors duration-150"
-                           style={{ pointerEvents: 'auto' }}
-                           onMouseUp={(e) => handleInputMouseUp(block.instanceId, 'input', e as any)}
-                         >
-                           <title>Left Input • Right connects here</title>
-                         </circle>
-                       )}
-                       
-                       {/* Top input handle */}
+                       {/* Top input handle - ONLY for flow (bottom → top) */}
                        {hasInput && topPos && (
                          <circle
                            cx={topPos.x}
                            cy={topPos.y}
                            r={handleRadius}
-                           fill="#10b981"
+                           fill="#9333ea"
                            stroke="white"
                            strokeWidth={Math.max(0.5, 1 / effectiveScale)}
-                           className="cursor-pointer hover:fill-emerald-600 transition-colors duration-150"
+                           className="cursor-pointer hover:opacity-80 transition-opacity duration-150"
                            style={{ pointerEvents: 'auto' }}
                            onMouseUp={(e) => handleInputMouseUp(block.instanceId, 'top', e as any)}
                          >
-                           <title>Top Input • Bottom connects here</title>
+                           <title>Flow Input • Bottom connects here</title>
                          </circle>
                        )}
                        
-                       {/* Right output handle */}
-                       {hasOutput && rightPos && (
-                         <circle
-                           cx={rightPos.x}
-                           cy={rightPos.y}
-                           r={handleRadius}
-                           fill="#3b82f6"
-                           stroke="white"
-                           strokeWidth={Math.max(0.5, 1 / effectiveScale)}
-                           className="cursor-pointer hover:fill-blue-600 transition-colors duration-150"
-                           style={{ pointerEvents: 'auto' }}
-                           onMouseDown={(e) => handleOutputMouseDown(block.instanceId, 'output', e as any)}
-                         >
-                           <title>Right Output • Drag to left input</title>
-                         </circle>
-                       )}
-                       
-                       {/* Bottom output handle */}
+                       {/* Bottom output handle - ONLY for flow (bottom → top) */}
                        {hasOutput && bottomPos && (
                          <circle
                            cx={bottomPos.x}
                            cy={bottomPos.y}
                            r={handleRadius}
-                           fill="#3b82f6"
+                           fill="#9333ea"
                            stroke="white"
                            strokeWidth={Math.max(0.5, 1 / effectiveScale)}
-                           className="cursor-pointer hover:fill-blue-600 transition-colors duration-150"
+                           className="cursor-pointer hover:opacity-80 transition-opacity duration-150"
                            style={{ pointerEvents: 'auto' }}
                            onMouseDown={(e) => handleOutputMouseDown(block.instanceId, 'bottom', e as any)}
                          >
-                           <title>Bottom Output • Drag to top input</title>
+                           <title>Flow Output • Drag to top input</title>
                          </circle>
                        )}
                      </g>
@@ -1048,12 +1418,11 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
          {/* Temporary connection while dragging */}
          {tempConnection && connectionStart && (
            <path
-             d={generateBezierPath(
+             d={generateStraightPath(
                tempConnection.x1, 
                tempConnection.y1, 
                tempConnection.x2, 
-               tempConnection.y2, 
-               connectionStart.handle === 'bottom' ? 'vertical' : 'horizontal'
+               tempConnection.y2
              )}
              stroke="#6b7280"
              strokeWidth="2"
@@ -1105,6 +1474,7 @@ export const BlockWorkspace: React.FC<BlockWorkspaceProps> = ({ spriteId, isStag
                     isInWorkspace={true}
                     onDelete={() => removeBlockFromWorkspace(block.instanceId)}
                     nestingLevel={0} // No nesting in flowchart mode
+                    zoomLevel={workspaceTransform.scale}
                   />
                 </div>
               </div>

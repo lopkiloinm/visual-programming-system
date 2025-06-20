@@ -17,17 +17,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onRunningStateChange 
 }) => {
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1">
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex-1 overflow-hidden">
         <Canvas 
           onDebugLogsChange={onDebugLogsChange}
           onRunningStateChange={onRunningStateChange}
         />
       </div>
       
-      <div className="border-t border-gray-300">
-        <SpritePanel />
-      </div>
+      <SpritePanel />
     </div>
   );
 };
